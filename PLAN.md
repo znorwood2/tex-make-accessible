@@ -1,121 +1,162 @@
-# Plan: a skill for making LaTeX documents pass Canvas Ally
+# Plan: a skill for making LaTeX documents accessible
 
 ## Goal
 
-Give colleagues a skill (for Claude, and portable to ChatGPT) that takes their existing `.tex` source and helps them produce a PDF that:
+A shareable AI skill that helps math faculty and grad students fix their LaTeX source so it compiles to accessible, tagged PDFs.
 
-1. scores well in Anthology Ally on Canvas, and
-2. meets the underlying standard (WCAG 2.1 AA / PDF/UA-style tagging), not just Ally's checks.
+- **Target:** WCAG 2.1 AA.
+- **First milestone:** a 100% Anthology Ally score in Canvas. That's what colleagues will see, and it covers the biggest problems.
+- **Beyond Ally:** good alt text (Ally only checks that alt text exists and isn't a filename), math accessibility, link text and reading order.
+- **Never claim "compliant."** The skill reports "passes automated checks; a person still needs to review: …".
 
-The evidence base is [`docs/ally-findings.md`](docs/ally-findings.md): 62 controlled Ally scores from the `pdfcheck` project. The skill should rank its advice by that data, and say so when advice goes beyond it.
+Evidence base: [`docs/ally-findings.md`](docs/ally-findings.md), 62 controlled Ally scores from the [`pdfcheck`](https://github.com/znorwood2/pdfcheck) project. Advice keeps that document's labels: measured, inferred or untested.
 
-## Who uses it, and how
+## Audience and context
 
-- **Users:** faculty and staff who write LaTeX but don't know PDF tagging. Many use Overleaf, not a local TeX install.
-- **Surfaces:**
-  - Claude.ai / Claude desktop with the skill uploaded (most colleagues).
-  - Claude Code (people with a local TeX install; can compile and verify).
-  - ChatGPT (same `SKILL.md` format; may lack code execution or a TeX install).
-- **Consequence:** the skill must work in "no tools" mode (read the source, propose edits) and get better when it can run scripts and compile.
+- Colleagues in the UNL math department who write LaTeX but aren't accessibility experts.
+- Documents: syllabi, exams, worksheets, lecture notes and papers. Beamer slides are out of scope for now (see "Hard cases").
+- Many colleagues won't have paid Claude accounts. The university's ChatGPT Edu accounts use Skills (Custom GPTs are retired there). The design must work with limited tools.
+- **Local TeX first.** The first versions assume the user compiles on their own machine with a recent TeX Live. Overleaf support comes later (see "Overleaf").
 
-## What the skill does (the workflow in `SKILL.md`)
+## Architecture
 
-1. **Intake.** Collect the `.tex` files (including `\input`/`\include` children), the document class, the engine, and where it's compiled (Overleaf or local, TeX Live year). Ask for the Ally report if they have one: score, issue descriptions, and the "Increase score up to N%" figures.
-2. **Audit.** Check the source against the checklist below. Report findings ranked by Ally score impact (tagging and contrast first), each with the line, the fix and the expected score gain.
-3. **Fix.** Edit a copy of the source, never silently. Typical edits:
-   - add `\DocumentMetadata{...}` as line 1 with the right `lang=`;
-   - add `\hypersetup{pdftitle={...}}`;
-   - add `alt={...}` to every `\includegraphics` (drafted from the image and caption if visible, marked for the author to confirm);
-   - turn bold "fake headings" into `\section`-style commands;
-   - declare table header rows;
-   - darken colours below 4.5:1 against white.
-4. **Compile and verify** (when possible). Compile with LuaLaTeX twice and run `pdfcheck --canvas` on the PDF. Without tools, give exact Overleaf steps instead (set compiler to LuaLaTeX, check TeX Live version) and tell the user what to check in Ally after upload.
-5. **Hand-off.** A short change log, a list of things only the author can judge (alt-text accuracy, decorative vs. informative images, reading order), and anything the skill couldn't fix (unsupported packages).
+1. **One repo, one skill, open `SKILL.md` format.** Claude and ChatGPT Skills read the same files. Platform differences go in the install docs, not in separate copies.
+2. **Scripts do the mechanical work; the AI makes the judgment calls.** Scripts produce a JSON report. `SKILL.md` tells the model to run them, work through the judgment items, have the user recompile, re-check and summarize.
+3. **Package compatibility is data, not code.** `data/packages.yaml` lists each package's tagging status, safe alternatives and notes. It starts from the LaTeX Project's tagging status list. New findings become pull requests to this file.
+4. **Detect liberally, fix conservatively.** Regex parsing of TeX is fragile. Scripts flag problems widely but make only safe, repeatable edits (such as inserting the preamble). They never overwrite the original; they write a copy plus a diff.
+5. **Python standard library only.** The scripts must run in Claude's and ChatGPT's sandboxes without installs.
+6. **Pin a minimum TeX Live version.** Check `\DocumentMetadata` keys against the user's installed version (`testphase=latest` vs. `tagging=on`, `pdfstandard=ua-2`).
 
-## The checklist (from the findings, ordered by impact)
+## Workflow (what `SKILL.md` tells the model)
 
-| # | Check | Ally cost if wrong | Source-level test |
-|---:|---|---|---|
-| 1 | Tagged PDF | caps score at 12 | `\DocumentMetadata` present and first; engine is LuaLaTeX |
-| 2 | Contrast ≥ 4.5:1 on white | down to 5 | colour uses lighter than `#767676`: `gray`, `lightgray`, `black!NN` (NN < ~54), link colours, beamer themes, `\color{white}` |
-| 3 | Alt text on every figure | ×0.54 | every `\includegraphics` has `alt=`; missing alt means the filename is used, which Ally fails |
-| 4 | Real headings (3+ pages) | ×0.54 | sectioning commands used; no `\textbf{...}` heading lines |
-| 5 | Table header cells (3+ rows) | ×0.69 | `table/header-rows` set before data tables |
-| 6 | Correct `lang` | −5 | `lang=` matches the text (default is English) |
-| 7 | Headings start at H1 | −5 | first heading maps to H1 |
-| 8 | Title in Info dictionary | −2 | `pdftitle` set and meaningful |
-| 9 | No skipped heading levels / > H6 | −2 | no `\section` → `\subsubsection` jumps |
+The AI sandbox probably lacks a recent TeX Live, so compiling happens on the user's machine:
 
-Beyond Ally (WCAG items Ally doesn't score, flagged as advice): meaningful alt-text quality, decorative images as artifacts, link text, math accessibility, reading order.
+```
+check script → AI edits a copy → user compiles (LuaLaTeX, twice)
+     ↑                                         ↓
+     └── AI fixes ← pdfcheck / veraPDF report ←┘
+```
+
+1. **Intake.** Collect all `.tex` files (follow `\input`/`\include`), class, packages and TeX Live version. Ask for the Ally report if there is one: score, issue texts and the "Increase score up to N%" figures.
+2. **Check.** Run `check_tex.py` and read its report. Stop and ask before going further if the document is in a "hard case" (below).
+3. **Fix.** Apply safe fixes automatically. Make judgment fixes with the user: alt text, table headers and turning fake headings into real ones.
+4. **Verify.** The user compiles with LuaLaTeX and runs `pdfcheck --canvas` (predicts Ally) and, optionally, veraPDF (PDF/UA). They paste the output back, and the AI maps each failure to a line of source.
+5. **Hand-off.** A change log, plus the items a person must review: alt-text accuracy, decorative vs. informative images, reading order and math.
+
+## Division of labour
+
+**Scripts (mechanical)**
+- **Preamble:** `\DocumentMetadata` present and first, with `lang`, tagging and `pdfstandard`. Insert the template if missing. Check `\hypersetup{pdftitle=...}`.
+- **Packages:** scan against `packages.yaml`.
+- **Inventory:**
+  - `\includegraphics` without `alt=`. Missing alt means LaTeX inserts the filename, which Ally fails.
+  - `tikzpicture`s and `tabular`s.
+  - Heading outline.
+- **Contrast:** colours lighter than `#767676` on white, computed from xcolor expressions (`gray!40`, `black!50`, `\definecolor`), link colours, `\color{white}`.
+- **Lint:**
+  - fake headings (`\textbf{...}` or `{\bf ...}` alone on a line);
+  - headings that don't start at level 1 or that skip levels;
+  - `$$...$$`;
+  - bare URLs and "click here" link text.
+- **After compiling:** condense `pdfcheck` and veraPDF output into a short list of failures.
+
+**AI (judgment)**
+- **Alt text, especially for math graphics.** Examples: function graphs, geometric figures, commutative diagrams and TikZ. The alt text says what a student needs from the figure, not just what it looks like. Complex figures also get a longer description in the text.
+- **Tables:** whether one is a data table (needs header rows or columns) or only for layout.
+- **Fake headings:** converting them to real sectioning without changing how the document looks.
+- **Packages:** alternatives to incompatible packages, or deciding a package is safe with certain usage.
+- **Colours:** darker colours that keep the author's intent.
+- **Validator output:** mapping failures back to source lines.
+
+## Ally checklist (first milestone), ordered by score impact
+
+| # | Check | Ally cost if wrong |
+|---:|---|---|
+| 1 | Tagged PDF (`\DocumentMetadata`, LuaLaTeX) | caps score at 12 |
+| 2 | All text ≥ 4.5:1 contrast on white | down to 5 on one page |
+| 3 | Every figure has alt text that isn't a filename | ×0.54 |
+| 4 | Real headings in documents of 3+ pages | ×0.54 |
+| 5 | Header cells in data tables with 3+ rows | ×0.69 |
+| 6 | `lang` set and correct | −5 |
+| 7 | Headings start at H1 | −5 |
+| 8 | Title in the PDF Info dictionary (`pdftitle`) | −2 |
+| 9 | No skipped heading levels, none beyond H6 | −2 |
+
+WCAG items that Ally doesn't score are reported separately as "still needed for WCAG 2.1 AA". These cover alt-text quality, math (MathML via LuaLaTeX), meaningful link text and reading order.
+
+## Hard cases: warn and ask
+
+The skill names the risk and asks the user how to proceed. It doesn't guess.
+
+- **Beamer.** Tagging requires converting to `ltx-talk`, which is changing quickly. Warn and offer options: convert at the user's own risk, or produce an accessible handout or notes version from the same content.
+- **Packages listed as incompatible** in `packages.yaml`, and classes not yet checked. The exam class and journal classes need checking early.
+- **Heavy custom macros, or catcode tricks** that the scripts can't read reliably.
+- **TeX Live too old** for tagging.
 
 ## Repository layout
 
 ```
-README.md                         what this is, how to install on each surface
-PLAN.md                           this file
-docs/
-  ally-findings.md                evidence base (the pdfcheck briefing)
-  install-claude.md               upload to Claude.ai / use in Claude Code
-  install-chatgpt.md              ChatGPT setup and limitations
-skills/latex-ally-accessibility/
-  SKILL.md                        trigger description + the 5-step workflow (kept short)
-  references/
-    checklist.md                  the table above, with fixes and examples
-    ally-scoring.md               score model, issue texts, "Increase score up to" use
-    recipes.md                    preambles for article, report/book, beamer, Overleaf
-    colour-contrast.md            safe colour substitutions, xcolor mix arithmetic
-    alt-text.md                   how to write alt text for figures, plots, diagrams, math
-    package-compat.md             packages known to break or need care under tagging
-    troubleshooting.md            common compile errors after adding \DocumentMetadata
-  scripts/
-    audit_tex.py                  static checker: .tex in, ranked findings out (JSON + text)
-    contrast.py                   contrast ratio for xcolor expressions (gray!40, etc.)
-  templates/
-    article-accessible.tex        the recipe that scored 100
-tests/
-  fixtures/                       small .tex files, one problem each, plus expected findings
-  test_audit.py
+tex-make-accessible/
+├── README.md                       what it is; links to install docs
+├── PLAN.md
+├── docs/
+│   ├── ally-findings.md            evidence base from pdfcheck
+│   ├── install-claude.md           Claude app (upload zip), Claude Code (plugin)
+│   ├── install-chatgpt.md          ChatGPT Edu Skills
+│   └── for-colleagues.md           one-page how-to
+├── skills/tex-make-accessible/
+│   ├── SKILL.md                    workflow, decision rules, hard cases
+│   ├── reference/
+│   │   ├── preamble.md             \DocumentMetadata keys by TeX Live version
+│   │   ├── ally-checklist.md       table above with fixes and scoring model
+│   │   ├── alt-text-math.md        alt text for math graphics, with examples
+│   │   ├── tables.md               data vs. layout tables, header-row syntax
+│   │   ├── contrast.md             safe colour substitutions
+│   │   └── wcag-beyond-ally.md     math, links, reading order
+│   ├── data/packages.yaml          package compatibility list
+│   ├── scripts/
+│   │   ├── check_tex.py            inventory + lint → JSON report
+│   │   ├── fix_preamble.py         safe preamble insertion (writes a copy)
+│   │   └── summarize_validation.py condenses pdfcheck / veraPDF output
+│   └── templates/article.tex       the preamble that scored 100 in Ally
+├── .claude-plugin/                 Claude Code marketplace manifest
+├── PROMPT.md                       paste-anywhere prompt for any chatbot (later)
+└── tests/
+    ├── fixtures/                   tiny .tex files, one problem each
+    └── corpus/                     anonymized department files (see roadmap step 1)
 ```
 
-Keep `SKILL.md` short (workflow and decision rules) and put detail in `references/`, so the skill loads quickly and the model reads detail only when needed. Scripts use only the Python standard library, so they run in Claude's and ChatGPT's sandboxes.
+## Roadmap
 
-## Build phases
+1. **Test corpus.** Collect 10–15 typical department `.tex` files (syllabus, exam, worksheet, notes) with the authors' permission. Remove names and student information. These test the scripts on real documents, not just made-up examples.
+2. **Check script + `packages.yaml`.** Run it on the corpus to find the most common problems and judgment calls.
+3. **`SKILL.md` and reference files**, written around what step 2 finds. Release the Claude skill (zip and Claude Code plugin).
+4. **Pilot** with 2–3 colleagues, including one on free Claude and one on ChatGPT Edu. Success means their documents reach Ally 100 and pass veraPDF, with alt text they're happy to sign off.
+5. **ChatGPT Skills install guide**, once UNL IT confirms Skills are enabled for Edu.
+6. **Overleaf support** (see below).
+7. **`PROMPT.md`** for people with no skill support, then colleague docs and a department announcement.
 
-**Phase 1: working skill for `article` documents (MVP)**
-- `SKILL.md`, `checklist.md`, `recipes.md` (article only), `alt-text.md`, the template.
-- Works with no scripts: the model audits by reading the source.
-- Done when: three real colleague documents go from their current Ally score to 95+ using only the skill.
+## Overleaf (later)
 
-**Phase 2: deterministic audit**
-- `audit_tex.py` and `contrast.py`, with fixtures and tests for each checklist row.
-- Handles multi-file projects and resolves `\definecolor` / `\colorlet`.
-- The skill runs the script when it can and falls back to reading when it can't.
+Overleaf can compile tagged PDFs if the project uses LuaLaTeX and a recent TeX Live (both set in the project's Menu). The skill can still edit the source; the gap is verification. Options to evaluate:
+- users download the PDF and run `pdfcheck` locally;
+- users rely on Ally's report after uploading to Canvas;
+- some web-based check, if one turns up.
 
-**Phase 3: other document types**
-- `report`/`book` (check what `\chapter` maps to; must start at H1).
-- Beamer slides (tagging support is incomplete; may need advice like "export handouts" or "keep slides simple").
-- Math-heavy notes (test whether Ally checks math; document LuaLaTeX MathML options).
-- Exam and assignment classes commonly used in the department.
-- Each needs a few Ally probes through `pdfcheck` before writing advice; mark advice "untested" until then.
+The first step is confirming which TeX Live versions Overleaf currently offers and whether they support the needed `\DocumentMetadata` keys.
 
-**Phase 4: packaging and roll-out**
-- Install guides for Claude and ChatGPT, a one-page "how to use it" for colleagues.
-- A results log template so colleagues' Ally scores feed back into `pdfcheck` regression tests (the `probes/*/results.csv` format).
+## Open questions
 
-## Rules the skill must follow
+- Does UNL IT enable Skills in the ChatGPT Edu workspace?
+- What is the minimum TeX Live version, and what are the current `\DocumentMetadata` keys? Verify against LaTeX Project docs before writing the template.
+- What do `\chapter`/`\section` map to in `report`/`book`?
+- Does Ally check math at all?
+- What are the tagging status of the exam class and of TikZ alt text?
 
-- Never claim a score; say what Ally is expected to report and tell the user to confirm in Canvas.
-- Label advice as measured, inferred or untested, matching the findings doc.
-- Draft alt text but always ask the author to confirm it; never use the filename or "image".
-- Don't change visible content or layout except where needed (colours, fake headings), and list every such change.
-- Check the TeX version before choosing `\DocumentMetadata` keys (`testphase=latest` vs. `tagging=on`, `pdfstandard`).
-- If a package blocks tagging, say so plainly rather than producing a PDF that looks tagged but isn't.
+## References
 
-## Open questions for you
-
-1. **Where do colleagues compile?** Mostly Overleaf, local TeX, or both? This sets how much of the skill is "Overleaf steps" vs. "run this".
-2. **Which document types matter most?** Lecture notes, Beamer slides, problem sets/exams, papers? Beamer is the hardest and least tested.
-3. **ChatGPT target:** the newer Skills feature (same `SKILL.md` format) or a Custom GPT with knowledge files? The plan assumes Skills.
-4. **Can colleagues install `pdfcheck`?** If not, the verify step relies on uploading to Canvas.
-5. **Target bar:** Ally 100, or full WCAG 2.1 AA (the ADA Title II rule for public universities)? The plan aims at both but ranks by Ally.
-6. **Can I use real documents** (with permission) as test fixtures for Phase 1?
+- Overleaf on native tagging: https://www.overleaf.com/blog/bridging-the-accessibility-gap-why-latexs-native-pdf-tagging-matters-now
+- LaTeX tagging project status: https://latex3.github.io/tagging-project/
+- Utah Math accessible LaTeX guide: https://www.math.utah.edu/accessibility/latex-generated-pdfs.php
+- UF LaTeX accessibility guide: https://people.clas.ufl.edu/jnowell/latex-accessibility/
+- Claude skills help: https://support.claude.com/en/articles/12512180-use-skills-in-claude
