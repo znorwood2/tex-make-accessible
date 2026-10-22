@@ -43,7 +43,7 @@ A shareable AI skill that helps math faculty and grad students fix their LaTeX s
 
    - `templates/article.tex` is the page's `tagged-pdf-example.tex`.
    - `math/alt/use` is an Ally compromise: Ally doesn't yet recognize embedded MathML. The skill explains this, and drops the option if a student who uses a screen reader is involved, keeping `math/setup=mathml-SE`.
-   - When the page's block changes, the skill's copy changes in the same week. A test checks that the template and `reference/preamble.md` agree.
+   - The page's source is `math-resources-e4d30825c35241edbce4876eb472905a/index.html` in [`zachnorwood/zachnorwood.github.io`](https://github.com/zachnorwood/zachnorwood.github.io). A sync script (`scripts/dev/sync_from_page.py`) reads that file from a local clone and pulls out the metadata block and the `tagged-pdf-example.tex` source. A test fails if the skill's template or `reference/preamble.md` disagree with it.
 8. **The Ally findings predate the current preamble.** The experiments used `testphase=latest`. The skill uses `tagging=on` with PDF 2.0, as the page does. Phase 2 re-runs a few `pdfcheck` probes with the canonical preamble to confirm the findings still hold.
 
 ## Workflow (what `SKILL.md` tells the model)
