@@ -1,0 +1,126 @@
+% !TEX TS-program = lualatex
+% tagged-pdf-example.tex
+\DocumentMetadata{
+  lang        = en-US,
+  pdfversion  = 2.0,
+  pdfstandard = ua-2,
+  % pdfstandard = a-4f, % or a-4, for archiving; see the page for details
+  tagging     = on,
+  tagging-setup = {math/setup=mathml-SE, math/alt/use}
+}
+%%%%%%%% Don't load packages you don't need, and check here for packages
+%%%%%%%% not supported by the tagging project:
+%%%%%%%% https://latex3.github.io/tagging-project/tagging-status/
+%%%%%%%% Even amsmath and amsthm have been only partially supported!
+\documentclass{article}
+\usepackage{graphicx} % Required for inserting images
+\usepackage[math-style=TeX]{unicode-math} % also loads fontspec
+%%%%%%%% Fonts are handled differently by LuaLaTeX.
+%%%%%%%% Here is an example of declaring alternative fonts.
+%%%%%%%% You will need to have any fonts installed.
+  % \setmathfont{XITS Math}[StylisticSet = 1]
+  % \setmainfont{Crimson}
+
+\usepackage{tikz}
+
+\title{Tagged PDF tests}
+\author{Zach Norwood}
+\date{September 2025}
+
+\usepackage{hyperref}   %%% load hyperref *last*
+
+\begin{document}
+\hypersetup{
+  pdftitle={Tagged PDF tests},
+  pdfauthor={Zach Norwood},
+  pdfkeywords={accessibility, tagging},
+  % pdfdisplaydoctitle
+}
+\maketitle
+
+Give a proof by induction of the following identity, proved by other means in class.
+\[
+  \sum_{k=0}^n c(n,k) x^k = x^{(n)}.
+\]
+
+Matrix--vector multiplication gives a linear combination of the columns:
+\[
+\begin{bmatrix}
+ \vert &        & \vert \\
+ x_1   & \cdots & x_n   \\
+ \vert &        & \vert
+\end{bmatrix}
+\begin{bmatrix}
+ c_1 \\ \vdots \\ c_n
+\end{bmatrix}
+=
+c_1 \begin{bmatrix} \vert \\ x_1 \\ \vert \end{bmatrix}
++ \cdots + c_n \begin{bmatrix} \vert \\ x_n \\ \vert \end{bmatrix}
+\]
+
+\section{Introduction}
+
+\subsection{Your first theorem}
+
+A miracle of nature:
+\[
+f(a) = \frac{1}{2\pi i} \oint_\gamma \frac{f(z)}{z-a}\,dz
+\]
+
+\begin{enumerate}[item-label=(\alph{*})]
+%%% ^^^ no space between {enumerate} and [...]!
+%%% try \Alph, \arabic, or \roman instead of \alph
+\item start with A
+\item then on to B
+\item one more to C
+\item and end with D.
+\end{enumerate}
+
+Tables require additional code to tag header rows/columns.
+%%%%% full documentation here: https://texdoc.org/serve/latex-lab-table/0
+\tagpdfsetup{table/header-rows={1}}
+\tagpdfsetup{table/header-columns={1}}
+\begin{center}
+\begin{tabular}{r | l l}
+ $x$ & $f(x)$ & $f(x)^2$ \\ \hline
+ $1$ & $\pi$  & $\pi^2$  \\
+ $2$ & $-4$   & $16$
+\end{tabular}
+\end{center}
+
+Your tagging settings will persist until you change them.
+So change them when you add a table that has different header properties.
+\tagpdfsetup{table/header-rows={}}
+\tagpdfsetup{table/header-columns={1}}
+\[
+\begin{array}{c| ccccc}
+n   & 1 & 2 & 3 & 4 & 5 \\
+\hline
+p_n & 2 & 3 & 5 & 7 & 11 \\
+\end{array}
+\]
+
+\clearpage
+
+%%% Tagging of images is nontrivial.
+%%% https://texdoc.org/serve/latex-lab-graphic/0
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[style=thick, alt={The Petersen Graph}]
+  \foreach \x in {0,72,2*72,3*72,4*72}
+  {
+  \draw (\x+18:3cm) node {} -- (\x+90:3cm) node {};
+  \draw (\x+18:3cm) node {} -- (\x+18:1.7cm) node {};
+  \draw (\x+18:1.7cm) node {} -- (\x+162:1.7cm) node {};
+  }
+\end{tikzpicture}
+\caption{The Petersen Graph}
+\label{petersen}
+\end{figure}
+
+%%% This needs an image file named parabola (.png, .jpg, or .pdf) in the
+%%% same folder. Uncomment it once you have one, and describe your own image.
+% \includegraphics[height=4cm, alt={a parabola with $y$-intercept $(0,3)$ and vertex $(3,-6)$}]{parabola}
+
+\end{document}

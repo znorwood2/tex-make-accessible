@@ -1,0 +1,31 @@
+{
+ "_about": "Font packages written for pdfLaTeX. 'remove' entries are removed automatically by `tex-a11y fix` because LuaLaTeX does not need them. 'suggest' entries are only reported: the suggestion is the usual OpenType replacement loaded with fontspec/unicode-math, as in the template.",
+ "remove": {
+  "inputenc": "LuaLaTeX reads UTF-8 source natively.",
+  "fontenc": "LuaLaTeX uses the TU encoding; fontenc (for example T1) would load older Type 1 fonts.",
+  "lmodern": "LuaLaTeX already uses Latin Modern (OpenType) by default."
+ },
+ "suggest": {
+  "mathptmx": "\\usepackage{unicode-math} \\setmainfont{TeX Gyre Termes} \\setmathfont{TeX Gyre Termes Math}",
+  "times": "\\usepackage{fontspec} \\setmainfont{TeX Gyre Termes}",
+  "txfonts": "\\usepackage{unicode-math} \\setmainfont{TeX Gyre Termes} \\setmathfont{TeX Gyre Termes Math}",
+  "newtxtext": "\\usepackage{fontspec} \\setmainfont{TeX Gyre Termes}",
+  "newtxmath": "\\usepackage{unicode-math} \\setmathfont{TeX Gyre Termes Math}",
+  "mathpazo": "\\usepackage{unicode-math} \\setmainfont{TeX Gyre Pagella} \\setmathfont{TeX Gyre Pagella Math}",
+  "palatino": "\\usepackage{fontspec} \\setmainfont{TeX Gyre Pagella}",
+  "pxfonts": "\\usepackage{unicode-math} \\setmainfont{TeX Gyre Pagella} \\setmathfont{TeX Gyre Pagella Math}",
+  "newpxtext": "\\usepackage{fontspec} \\setmainfont{TeX Gyre Pagella}",
+  "newpxmath": "\\usepackage{unicode-math} \\setmathfont{TeX Gyre Pagella Math}",
+  "helvet": "\\usepackage{fontspec} \\setsansfont{TeX Gyre Heros}",
+  "libertine": "\\usepackage{unicode-math} \\setmainfont{Libertinus Serif} \\setmathfont{Libertinus Math}",
+  "libertinus": "\\usepackage{unicode-math} \\setmainfont{Libertinus Serif} \\setmathfont{Libertinus Math}",
+  "eulervm": "\\usepackage{unicode-math} \\setmathfont{Euler Math}",
+  "fourier": "\\usepackage{unicode-math} \\setmainfont{Erewhon} \\setmathfont{Erewhon Math}",
+  "kpfonts": "\\usepackage{unicode-math} \\setmainfont{KpRoman} \\setmathfont{KpMath}",
+  "charter": "\\usepackage{fontspec} \\setmainfont{XCharter}",
+  "XCharter": "\\usepackage{fontspec} \\setmainfont{XCharter}",
+  "mathdesign": "Choose an OpenType text and math font pair with fontspec/unicode-math.",
+  "cmbright": "Choose an OpenType text and math font pair with fontspec/unicode-math.",
+  "concmath": "Choose an OpenType text and math font pair with fontspec/unicode-math."
+ }
+}

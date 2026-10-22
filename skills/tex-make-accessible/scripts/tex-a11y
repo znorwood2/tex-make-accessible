@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Run tex-a11y without installing anything: python3 path/to/tex-a11y check doc.tex"""
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from tex_a11y.cli import main  # noqa: E402
+
+sys.exit(main())

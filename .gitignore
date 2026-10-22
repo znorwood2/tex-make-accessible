@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# output of tex-a11y fix when run on test fixtures
+tests/fixtures/**/*-accessible.*
