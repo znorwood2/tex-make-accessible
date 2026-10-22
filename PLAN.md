@@ -14,9 +14,9 @@ Evidence base: [`docs/ally-findings.md`](docs/ally-findings.md), 62 controlled A
 ## Audience and context
 
 - Colleagues in the UNL math department who write LaTeX but aren't accessibility experts.
-- Documents: syllabi, exams, worksheets, lecture notes and papers. Beamer slides are out of scope for now (see "Hard cases").
+- Documents: syllabi, exams, worksheets, lecture notes and papers. `article` and similar classes come first. Exams need a conversion step, and Beamer slides are out of scope for now (see "Hard cases").
 - Many colleagues won't have paid Claude accounts. The university's ChatGPT Edu accounts use Skills (Custom GPTs are retired there). The design must work with limited tools.
-- **Local TeX first.** The first versions assume the user compiles on their own machine with a recent TeX Live. Overleaf support comes later (see "Overleaf").
+- **Local TeX first.** The first versions assume the user compiles on their own machine with TeX Live 2026. Overleaf support comes later (see "Overleaf").
 
 ## Architecture
 
@@ -25,7 +25,7 @@ Evidence base: [`docs/ally-findings.md`](docs/ally-findings.md), 62 controlled A
 3. **Package compatibility is data, not code.** `data/packages.yaml` lists each package's tagging status, safe alternatives and notes. It starts from the LaTeX Project's tagging status list. New findings become pull requests to this file.
 4. **Detect liberally, fix conservatively.** Regex parsing of TeX is fragile. Scripts flag problems widely but make only safe, repeatable edits (such as inserting the preamble). They never overwrite the original; they write a copy plus a diff.
 5. **Python standard library only.** The scripts must run in Claude's and ChatGPT's sandboxes without installs.
-6. **Pin a minimum TeX Live version.** Check `\DocumentMetadata` keys against the user's installed version (`testphase=latest` vs. `tagging=on`, `pdfstandard=ua-2`).
+6. **Require TeX Live 2026.** Supporting older installs would mean tracking individual LaTeX kernel releases, so the skill doesn't try. The check script reads the TeX Live year (`tex --version`, or the `.log` banner) and stops with upgrade instructions if it is older. The template and reference files use only the `\DocumentMetadata` keys that TeX Live 2026 supports.
 
 ## Workflow (what `SKILL.md` tells the model)
 
@@ -89,9 +89,14 @@ WCAG items that Ally doesn't score are reported separately as "still needed for 
 The skill names the risk and asks the user how to proceed. It doesn't guess.
 
 - **Beamer.** Tagging requires converting to `ltx-talk`, which is changing quickly. Warn and offer options: convert at the user's own risk, or produce an accessible handout or notes version from the same content.
-- **Packages listed as incompatible** in `packages.yaml`, and classes not yet checked. The exam class and journal classes need checking early.
+- **The `exam` class.** It is incompatible with the tagging code. Converting an exam to `article` is fairly easy if the exact layout doesn't need to survive. Before converting, the skill asks what the user needs to keep:
+  - **content only** (questions, parts, point values as text): convert to `article` with `enumerate`-based lists;
+  - **some layout** (point values in the margin, answer space, headers with name/score lines): convert and rebuild those pieces with tagging-safe commands, listing anything that will look different;
+  - **exact appearance** (a printed exam that must match): say that the tagged version can't match exactly yet, and offer to keep the original for printing and produce a separate accessible version.
+  `reference/exam-conversion.md` holds the mapping (`questions`/`parts`/`\question[pts]`/`solution` → article equivalents) and a worked example.
+- **Packages listed as incompatible** in `packages.yaml`, and other classes not yet checked (journal classes, department templates).
 - **Heavy custom macros, or catcode tricks** that the scripts can't read reliably.
-- **TeX Live too old** for tagging.
+- **TeX Live older than 2026.** Stop and explain how to upgrade.
 
 ## Repository layout
 
@@ -111,6 +116,7 @@ tex-make-accessible/
 │   │   ├── ally-checklist.md       table above with fixes and scoring model
 │   │   ├── alt-text-math.md        alt text for math graphics, with examples
 │   │   ├── tables.md               data vs. layout tables, header-row syntax
+│   │   ├── exam-conversion.md      exam class → article, by how much layout to keep
 │   │   ├── contrast.md             safe colour substitutions
 │   │   └── wcag-beyond-ally.md     math, links, reading order
 │   ├── data/packages.yaml          package compatibility list
@@ -148,10 +154,11 @@ The first step is confirming which TeX Live versions Overleaf currently offers a
 ## Open questions
 
 - Does UNL IT enable Skills in the ChatGPT Edu workspace?
-- What is the minimum TeX Live version, and what are the current `\DocumentMetadata` keys? Verify against LaTeX Project docs before writing the template.
+- Which `\DocumentMetadata` keys does TeX Live 2026 support (`tagging=on`, `pdfstandard=ua-2`, `testphase`)? Verify before writing the template.
 - What do `\chapter`/`\section` map to in `report`/`book`?
 - Does Ally check math at all?
-- What are the tagging status of the exam class and of TikZ alt text?
+- How should TikZ pictures get alt text in TeX Live 2026?
+- How should the skill link to and stay consistent with the department resource page (https://zachnorwood.github.io/math-resources-e4d30825c35241edbce4876eb472905a/)? Not yet reviewed.
 
 ## References
 
