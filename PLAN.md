@@ -27,7 +27,7 @@ A shareable AI skill that helps math faculty and grad students fix their LaTeX s
 2. **Scripts first; AI only for judgment.** Everything that can be decided from the source is done by a script, with no AI. The AI's job is reduced to a short list of questions that need judgment (alt text, table headers, heading names). See "Automation" below.
    - This keeps the AI part small enough for free Claude and ChatGPT accounts. Those have tight message limits and may not run code.
    - The scripts also work with no AI at all. A colleague can answer the questions themselves.
-3. **Package compatibility is data, not code.** `data/packages.yaml` lists each package's tagging status, safe alternatives and notes. It starts from the LaTeX Project's [tagging status list](https://latex3.github.io/tagging-project/tagging-status/). New findings become pull requests to this file.
+3. **Package compatibility is data, not code.** `data/packages.json` is generated from the LaTeX Project's [tagging status list](https://latex3.github.io/tagging-project/tagging-status/) by `dev/update_packages.py` (JSON, so users need no YAML library). Our own knowledge, such as font replacements, lives in separate files like `data/fonts.json`. New findings become pull requests to those files, or upstream to the tagging project.
 4. **Detect liberally, fix conservatively.** Regex parsing of TeX is fragile. Scripts flag problems widely but make only safe, repeatable edits (such as inserting the preamble). They never overwrite the original; they write a copy plus a diff.
 5. **Python standard library only.** The scripts must run on the user's machine and in Claude's and ChatGPT's sandboxes without installs. Most Macs and Linux machines already have Python 3. Windows users may not, so a `texlua` version of the preamble fix is worth considering (`texlua` ships with every TeX install).
 6. **Require TeX Live 2026.** Supporting older installs would mean tracking individual LaTeX kernel releases, so the skill doesn't try. The check script reads the TeX Live year (`tex --version`, or the `.log` banner). If it is older, it stops and points to the resource page's installation section. It also reminds users that `tlmgr update --self --all` updates packages within a release but doesn't upgrade to a new year.
@@ -45,7 +45,7 @@ A shareable AI skill that helps math faculty and grad students fix their LaTeX s
 
    - `templates/article.tex` is the page's `tagged-pdf-example.tex`.
    - `math/alt/use` is an Ally compromise: Ally doesn't yet recognize embedded MathML. The skill explains this, and drops the option if a student who uses a screen reader is involved, keeping `math/setup=mathml-SE`.
-   - The page's source is `math-resources-e4d30825c35241edbce4876eb472905a/index.html` in [`zachnorwood/zachnorwood.github.io`](https://github.com/zachnorwood/zachnorwood.github.io). A sync script (`scripts/dev/sync_from_page.py`) reads that file from a local clone and pulls out the metadata block and the `tagged-pdf-example.tex` source. A test fails if the skill's template or `reference/preamble.md` disagree with it.
+   - The page's source is `math-resources-e4d30825c35241edbce4876eb472905a/index.html` in [`zachnorwood/zachnorwood.github.io`](https://github.com/zachnorwood/zachnorwood.github.io). A sync script (`dev/sync_from_page.py`) reads that file from a local clone and pulls out the metadata block and the `tagged-pdf-example.tex` source. A test fails if the skill's template or `reference/preamble.md` disagree with it.
 8. **The Ally findings predate the current preamble.** The experiments used `testphase=latest`. The skill uses `tagging=on` with PDF 2.0, as the page does. Phase 2 re-runs a few `pdfcheck` probes with the canonical preamble to confirm the findings still hold.
 
 ## Automation: scripts first
@@ -92,12 +92,12 @@ Anyone can fill it in:
 | Figures | Find every `\includegraphics` and `tikzpicture` without `alt=` | Decorative graphics (logos, rules): mark as `artifact` on confirmation | Alt text |
 | Headings | Report outline, skipped levels and fake headings | Turning a fake heading into `\section*` with matching appearance | Heading names for long problem sets |
 | Lists | Convert simple `enumitem` labels to `item-label` | Complex `enumitem` settings | |
-| Packages | Look up every package in `packages.yaml`; apply listed safe replacements | Partly supported packages, by how they're used | Unsupported packages with no listed replacement |
+| Packages | Look up every package in `packages.json`; apply listed safe replacements | Partly supported packages, by how they're used | Unsupported packages with no listed replacement |
 | `exam` class | Content-only conversion once the user picks that option | Partial layout rebuild | Which layout to keep |
 | Links | Find bare URLs and "click here" text | | Better link text |
 | After compiling | Run LuaLaTeX and `pdfcheck`, summarise failures by source line | | Failures the summary can't map |
 
-Over time, answers that turn out to be predictable move left in this table. Examples: a new entry in `packages.yaml`, or a new header-row pattern the script recognizes.
+Over time, answers that turn out to be predictable move left in this table. Examples: a new entry in `packages.json`, or a new header-row pattern the script recognizes.
 
 ## Workflow (what `SKILL.md` tells the model)
 
@@ -166,7 +166,7 @@ The skill names the risk and asks the user how to proceed. It doesn't guess.
   - **Exact appearance** (a printed exam that must match): explain that the tagged version can't match exactly yet. Offer to keep the original for printing and make a separate accessible version.
 
   `reference/exam-conversion.md` holds the mapping (`questions`/`parts`/`\question[pts]`/`solution` → `article` equivalents) and a worked example.
-- **Other unsupported packages and classes** (`amsart`, journal classes, department templates). Check `packages.yaml` and the tagging status list first.
+- **Other unsupported packages and classes** (`amsart`, journal classes, department templates). Check `packages.json` and the tagging status list first.
 - **Heavy custom macros, or catcode tricks** that the scripts can't read reliably.
 - **TeX Live older than 2026.** Stop and explain how to upgrade.
 - **Out of scope:** handwritten or scanned content, and LaTeX-to-HTML conversion. The skill points to the resource page's sections on these instead.
@@ -195,12 +195,15 @@ tex-make-accessible/
 │   │   ├── contrast.md             safe colour substitutions
 │   │   ├── troubleshooting.md      common errors, lualatex-dev, tagging-project issues
 │   │   └── wcag-beyond-ally.md     math, links, reading order
-│   ├── data/packages.yaml          package compatibility list
-│   ├── data/fonts.yaml             pdfTeX font package → fontspec/unicode-math mapping
+│   ├── data/packages.json          package compatibility list (generated)
+│   ├── data/fonts.json             pdfTeX font package → fontspec/unicode-math mapping
 │   ├── scripts/
-│   │   ├── tex_a11y/               the tex-a11y tool (check, fix, apply, build, convert-exam)
-│   │   └── dev/sync_from_page.py   keeps the preamble and template in sync with the resource page
+│   │   ├── tex-a11y                launcher: python3 tex-a11y check|fix doc.tex
+│   │   └── tex_a11y/               the tool (check, fix; later apply, build, convert-exam)
 │   └── templates/article.tex       the resource page's tagged-pdf-example.tex
+├── dev/                            developer tools (not shipped in the skill)
+│   ├── update_packages.py          regenerate data/packages.json from the tagging project
+│   └── sync_from_page.py           keep preamble and template in sync with the resource page (to do)
 ├── .claude-plugin/                 Claude Code marketplace manifest
 ├── PROMPT.md                       short prompt to paste with a questions file into any chatbot
 └── tests/
@@ -211,7 +214,7 @@ tex-make-accessible/
 ## Roadmap
 
 1. **Test corpus.** Collect 10–15 typical department `.tex` files (syllabus, exam, worksheet, problem set, notes) with the authors' permission, and remove names and student information. The Service Course Repository's Accessibility folder is a natural starting point.
-2. **`tex-a11y check` and `fix` (automatic fixes only) + `packages.yaml`.** Run them on the corpus to find the most common problems and judgment calls. Re-run a few Ally probes with the canonical preamble (see Architecture 8). This alone gives a usable, no-AI tool.
+2. **`tex-a11y check` and `fix` (automatic fixes only) + `packages.json`.** *First version done; tested on made-up fixtures and the 127 documents in the OER repo.* Run them on the corpus to find the most common problems and judgment calls. Re-run a few Ally probes with the canonical preamble (see Architecture 8). This alone gives a usable, no-AI tool.
 3. **Questions file, `apply`, `build` and `PROMPT.md`.** Test the questions file on a free Claude and a free ChatGPT account to make sure it fits comfortably in one conversation.
 4. **`SKILL.md` and reference files**, written around what steps 2–3 find and cross-linked to the resource page. Release the Claude skill (zip and Claude Code plugin).
 5. **Pilot** with 2–3 colleagues, including one on free Claude and one on ChatGPT Edu. Success means their documents reach Ally 100 and pass veraPDF, with alt text they're happy to sign off.
