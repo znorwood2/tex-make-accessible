@@ -268,6 +268,18 @@ def parse_keyvals(s: str) -> list[tuple[str, str | None, tuple[int, int]]]:
     return items
 
 
+SYMBOLS = {
+    "alpha": "α", "beta": "β", "gamma": "γ", "delta": "δ", "epsilon": "ε", "varepsilon": "ε", "zeta": "ζ",
+    "eta": "η", "theta": "θ", "vartheta": "θ", "iota": "ι", "kappa": "κ", "lambda": "λ", "mu": "μ", "nu": "ν",
+    "xi": "ξ", "pi": "π", "rho": "ρ", "sigma": "σ", "tau": "τ", "upsilon": "υ", "phi": "φ", "varphi": "φ",
+    "chi": "χ", "psi": "ψ", "omega": "ω", "Gamma": "Γ", "Delta": "Δ", "Theta": "Θ", "Lambda": "Λ", "Xi": "Ξ",
+    "Pi": "Π", "Sigma": "Σ", "Phi": "Φ", "Psi": "Ψ", "Omega": "Ω",
+    "infty": "∞", "le": "≤", "leq": "≤", "ge": "≥", "geq": "≥", "ne": "≠", "neq": "≠", "times": "×",
+    "cdot": "·", "pm": "±", "to": "→", "approx": "≈", "in": "∈", "partial": "∂", "nabla": "∇", "sum": "∑",
+    "int": "∫", "sqrt": "√", "ldots": "…", "dots": "…", "cdots": "⋯",
+}
+
+
 def plain_text(tex: str) -> str:
     """Rough conversion of a short LaTeX fragment (like a title) to plain text."""
     s = tex
@@ -290,6 +302,7 @@ def plain_text(tex: str) -> str:
     s = re.sub(r"\\(newline|linebreak|par|quad|qquad|,|;|:|!| )", " ", s)
     s = re.sub(r"\\([&%$#_{}])", r"\1", s)
     s = s.replace("--", "–")
+    s = re.sub(r"\\([A-Za-z]+)(?![A-Za-z])", lambda m: SYMBOLS.get(m.group(1), m.group(0)), s)
     s = re.sub(r"\\[A-Za-z@]+\*?(\[[^\]]*\])?", "", s)
     s = s.replace("{", "").replace("}", "").replace("$", "")
     return re.sub(r"\s+", " ", s).strip()

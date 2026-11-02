@@ -26,6 +26,7 @@
   "XCharter": "\\usepackage{fontspec} \\setmainfont{XCharter}",
   "mathdesign": "Choose an OpenType text and math font pair with fontspec/unicode-math.",
   "cmbright": "Choose an OpenType text and math font pair with fontspec/unicode-math.",
-  "concmath": "Choose an OpenType text and math font pair with fontspec/unicode-math."
+  "concmath": "Choose an OpenType text and math font pair with fontspec/unicode-math.",
+  "MinionPro": "\\usepackage{unicode-math} \\setmainfont{Minion Pro} (needs the OpenType font installed) and a matching \\setmathfont, e.g. \\setmathfont{STIX Two Math}"
  }
 }

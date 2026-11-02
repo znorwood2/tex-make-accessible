@@ -267,6 +267,68 @@ class TestBodyChecks(TempDoc):
                      "\\begin{tikzpicture}\\draw (0,0)--(1,1);\\end{tikzpicture}\n\\end{document}\n")
         self.assertEqual(codes(analyze(p, OPTS)), ["STANDALONE_FIGURE"])
 
+    def test_lessons_from_department_samples(self):
+        p = self.body(r"""
+            \noindent\textbf{Name:}
+            \hrulefill
+
+            \begin{center}
+            {\bf Introduction to Something} \\
+            {\bf by A. Author}
+            \end{center}
+
+            \lstset{backgroundcolor=\color{white}}
+            Press the {\color{green}$\rhd$} button.
+            \[ f(x) = \left\{ \begin{array}{cc} 1, & x<0 \\ 2, & x>0 \\ 3, & x=0 \end{array} \right. \]
+            """)
+        a = analyze(p, OPTS)
+        found = codes(a)
+        self.assertNotIn("FAKE_HEADING", found)          # form field and byline are not headings
+        self.assertNotIn("CONTRAST_NEAR_WHITE", found)   # background colour; light green is darkened instead
+        self.assertIn("CONTRAST_LOW", found)
+        self.assertNotIn("TABLE_NO_HEADERS", found)      # piecewise definition, not a table
+
+    def test_greek_letters_in_plain_text(self):
+        self.assertEqual(plain_text(r"Rates $\lambda=1$ and $\mu \le 2$"), "Rates λ=1 and μ ≤ 2")
+
+    def test_title_guess_skips_macro_definitions(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \begin{document}
+            \def\ctln{\centerline}
+            \ctln{\bf Math 100 Worksheet 1: Sets}
+            Text.
+            \end{document}
+            """)
+        t = next(f for f in analyze(p, OPTS).findings if f.code == "TITLE_MISSING")
+        self.assertEqual(t.data["suggestion"], "Math 100 Worksheet 1: Sets")
+
+    def test_enumerate_package_and_safe_packages_after_hyperref(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage{enumerate}
+            \usepackage{hyperref}
+            \usepackage{etoolbox}
+            \title{T}
+            \begin{document}
+            \begin{enumerate}\item a\end{enumerate}
+            \end{document}
+            """)
+        a = analyze(p, OPTS)
+        self.assertIn("ENUMERATE_PKG", codes(a, "auto"))
+        self.assertNotIn("HYPERREF_NOT_LAST", codes(a))
+
+    def test_line_endings_and_encoding_are_handled(self):
+        p = self.dir / "crlf.tex"
+        p.write_bytes("\\documentclass{article}\r\n\\title{Caf\xe9}\r\n\\begin{document}\r\nHi.\r\n\\end{document}\r\n".encode("cp1252"))
+        a = analyze(p, OPTS)
+        self.assertIn("ENCODING", codes(a, "auto"))
+        write(fix(a))
+        out = (self.dir / "crlf-accessible.tex").read_bytes()
+        self.assertIn(b"\r\n", out)
+        self.assertNotIn(b"\n", out.replace(b"\r\n", b""))
+        self.assertIn("Café".encode("utf-8"), out)
+
     def test_not_main_file(self):
         p = self.doc("\\section{Only a chapter}\n")
         self.assertEqual(codes(analyze(p, OPTS)), ["NOT_MAIN_FILE"])

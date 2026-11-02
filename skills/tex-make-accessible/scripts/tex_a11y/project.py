@@ -11,12 +11,25 @@ from .texscan import LineIndex, find_commands, mask
 INCLUDE_CMDS = ("input", "include", "subfile")
 
 
+def read_source(path: Path) -> tuple[str, str, str]:
+    """Read a .tex file. Returns (text with \\n line ends, original line ending, encoding read)."""
+    raw = path.read_bytes()
+    try:
+        text, enc = raw.decode("utf-8-sig"), "utf-8"
+    except UnicodeDecodeError:
+        text, enc = raw.decode("cp1252", errors="replace"), "cp1252"
+    newline = "\r\n" if text.count("\r\n") > text.count("\n") / 2 else "\n"
+    return text.replace("\r\n", "\n").replace("\r", "\n"), newline, enc
+
+
 @dataclass
 class SourceFile:
     path: Path
     text: str
     masked: str = ""
     lines: LineIndex | None = None
+    newline: str = "\n"
+    encoding: str = "utf-8"
 
     def __post_init__(self) -> None:
         self.masked = mask(self.text)
@@ -64,7 +77,8 @@ def _resolve(root: Path, name: str) -> Path | None:
 def load(main_path: str | Path) -> Project:
     main_path = Path(main_path).resolve()
     root = main_path.parent
-    main = SourceFile(main_path, main_path.read_text(encoding="utf-8", errors="replace"))
+    text, nl, enc = read_source(main_path)
+    main = SourceFile(main_path, text, newline=nl, encoding=enc)
     proj = Project(main=main, root=root, files={main_path: main})
     stack = [main]
     while stack:
@@ -79,7 +93,8 @@ def load(main_path: str | Path) -> Project:
                 if p is not None:
                     child = proj.files.get(p)
                     if child is None:
-                        child = SourceFile(p, p.read_text(encoding="utf-8", errors="replace"))
+                        ctext, cnl, cenc = read_source(p)
+                        child = SourceFile(p, ctext, newline=cnl, encoding=cenc)
                         proj.files[p] = child
                         stack.append(child)
                 proj.includes.append(Include(f, c.start, c.end, target, child))

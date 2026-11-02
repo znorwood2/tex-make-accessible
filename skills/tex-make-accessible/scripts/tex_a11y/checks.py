@@ -30,6 +30,11 @@ AFTER_HYPERREF = {
     "cleveref", "autonum", "hypcap", "bookmark", "glossaries", "glossaries-extra", "hyperxmp",
     "doi", "algorithm", "algorithmic", "algpseudocode", "nameref", "zref-hyperref", "uniquecounter",
 }
+# Utility packages that don't change what hyperref patches, so loading them after it is fine.
+SAFE_AFTER_HYPERREF = {
+    "etoolbox", "environ", "xparse", "ifthen", "calc", "xspace", "totcount", "comment", "verbatim",
+    "kvoptions", "xkeyval", "pgfkeys", "iftex", "ifpdf", "ifluatex", "booktabs", "array", "multirow",
+}
 BOOKLIKE_CLASSES = {"report", "book", "memoir", "scrreprt", "scrbook", "amsbook"}
 TABLE_ENVS = ("tabular", "tabular*", "tabularx", "tabulary", "longtable", "array")
 HEADING_LEVELS = {"chapter": 0, "section": 1, "subsection": 2, "subsubsection": 3, "paragraph": 4, "subparagraph": 5}
@@ -158,6 +163,7 @@ class Checker:
                      "(\\includegraphics[alt={...}]{...}).", self.p.main, self.class_cmd.start if self.class_cmd else 0)
             return self.a
         self.check_texlive()
+        self.check_encoding()
         self.check_includes()
         self.check_class()
         self.check_metadata()
@@ -217,6 +223,13 @@ class Checker:
                      f"TeX Live {year} is too old (found via {source}). Install TeX Live {REQUIRED_YEAR}.",
                      hint="`tlmgr update --self --all` does not move to a new year; install the new release. "
                           f"See {page('latex-setup-details')}")
+
+    def check_encoding(self) -> None:
+        for sf in self.p.files.values():
+            if sf.encoding != "utf-8":
+                self.add("ENCODING", "warning", "auto", RANK_OTHER,
+                         f"{self.p.rel(sf)} is not UTF-8 (read as Windows-1252/Latin-1). LuaLaTeX needs UTF-8, so the "
+                         "fixed copy is written as UTF-8. Check accented characters in the result.", sf, 0)
 
     def check_includes(self) -> None:
         for inc in self.p.includes:
@@ -414,7 +427,7 @@ class Checker:
     def check_packages(self) -> None:
         remove = self.fonts_db["remove"]
         suggest = self.fonts_db["suggest"]
-        handled = set(remove) | set(suggest) | {"enumitem", "hyperref"}
+        handled = set(remove) | set(suggest) | {"enumitem", "enumerate", "hyperref"}
         all_masked = "\n".join(sf.masked for sf in self.p.files.values())
         for l in self.loads:
             f, c = l.file, l.cmd
@@ -434,6 +447,19 @@ class Checker:
                     self.add("FONT_SUGGEST", "warning", "manual", RANK_OTHER,
                              f"Font package '{n}' is written for pdfLaTeX. Under LuaLaTeX use OpenType fonts instead.",
                              f, c.start, hint=f"Suggested replacement: {suggest[n]}")
+            if "enumerate" in l.names:
+                uses_opts = re.search(r"\\begin\s*\{enumerate\}\s*\[", all_masked)
+                if uses_opts or len(l.names) > 1:
+                    self.add("ENUMERATE_PKG", "warning", "manual", RANK_OTHER,
+                             "The enumerate package is incompatible with tagging. Its short label syntax "
+                             "(e.g. \\begin{enumerate}[(a)]) needs rewriting as label=(\\alph*).", f, c.start,
+                             hint="Remove \\usepackage{enumerate} and write \\begin{enumerate}[label=(\\alph*)] "
+                                  "(the tagging code supports enumitem's label syntax).")
+                else:
+                    self.add("ENUMERATE_PKG", "warning", "auto", RANK_OTHER,
+                             "Removed the enumerate package: it is incompatible with tagging and the document doesn't use "
+                             "its label options.", f, c.start,
+                             edits=[_comment_out(f, c.start, c.end, "not used; incompatible with tagging")])
             if "enumitem" in l.names:
                 uses = [cmd for cmd in ENUMITEM_PREAMBLE_CMDS if re.search(r"\\" + cmd + r"(?![A-Za-z])", all_masked)]
                 inline = "inline" in l.options or re.search(r"\\begin\{(enumerate|itemize|description)\*\}", all_masked)
@@ -501,7 +527,7 @@ class Checker:
             return
         h = hl[-1]
         idx = self.loads.index(h)
-        later = [l for l in self.loads[idx + 1:] if not set(l.names) <= AFTER_HYPERREF]
+        later = [l for l in self.loads[idx + 1:] if not set(l.names) <= AFTER_HYPERREF | SAFE_AFTER_HYPERREF]
         if not later:
             return
         names = sorted({n for l in later for n in l.names})
@@ -568,11 +594,39 @@ class Checker:
                          f"No PDF title set. Set pdftitle from \\title: '{plain}'.", f, c.start,
                          hint="Check that the title reads well on its own (Ally and screen readers show it).")
                 return
+        guess = self._title_guess()
         self.add("TITLE_MISSING", "error", "judgment", RANK_TITLE,
                  "The document has no title (no \\title or pdftitle). Ally reports 'This PDF does not have a title'.",
                  self.p.main, self.bd or 0,
-                 hint="Add \\hypersetup{pdftitle={...}} with a meaningful title.",
-                 data={"question": "pdftitle", "suggestion": self.p.main.path.stem.replace("_", " ").replace("-", " ")})
+                 hint="Add \\hypersetup{pdftitle={...}} with a meaningful title."
+                      + (f" The first line of the document looks like a title: '{guess}'." if guess else ""),
+                 data={"question": "pdftitle", "suggestion": guess or self.p.main.path.stem.replace("_", " ").replace("-", " ")})
+
+    def _title_guess(self) -> str | None:
+        """A centred or bold first line of the body, which often serves as the title."""
+        for sp in self.body:
+            f = sp.file
+            seg = f.masked[sp.start:sp.end]
+            pat = re.compile(r"\\(centerline|ctln|textbf|title)\s*\{|\{\s*\\(bf|bfseries|Large|LARGE|large|huge)(?![A-Za-z])|\\begin\s*\{center\}")
+            m = None
+            for cand in pat.finditer(seg[:3000]):
+                before = seg[max(0, cand.start() - 30):cand.start()]
+                if re.search(r"\\(def|let|gdef|edef)\s*\\?[A-Za-z]*\s*$|\\(re)?newcommand\*?\s*\{?\\?[A-Za-z]*\}?\s*(\[[^\]]*\])?\s*$", before):
+                    continue  # a macro definition, not text
+                m = cand
+                break
+            if not m:
+                return None
+            start = sp.start + m.start()
+            brace = f.masked.find("{", start + (len("\\begin{center}") if "center}" in m.group(0) else 1))
+            if m.group(0).startswith("{"):
+                brace = start
+            e = read_group(f.masked, brace) if brace != -1 else None
+            if e is None:
+                return None
+            text = plain_text(f.masked[brace:e])
+            return text if 3 <= len(text) <= 150 else None
+        return None
 
     # ---------- contrast ----------
     def check_contrast(self) -> None:
@@ -596,7 +650,7 @@ class Checker:
             ratio = col.contrast_on_white(rgb)
             if ratio >= col.MIN_CONTRAST:
                 return
-            if ratio < 1.5:
+            if min(rgb) >= 0.85:
                 self.add("CONTRAST_NEAR_WHITE", "warning", "manual", RANK_CONTRAST,
                          f"Text colour '{label}' is white or nearly white (contrast {ratio:.2f}:1 on white). "
                          "Ally flags this even on a dark background or for hidden text.", f, pos,
@@ -612,6 +666,8 @@ class Checker:
 
         for cmdname, spec in (("color", "om"), ("textcolor", "omm")):
             for f, c, _ in _cmds_in_spans(self.spans, cmdname, spec):
+                if re.search(r"(background|rule|frame|fill|back|bg)colou?r\s*=\s*\{?\s*$", f.masked[max(0, c.start - 40):c.start], re.I):
+                    continue  # a background or rule colour (e.g. listings' backgroundcolor=\color{white}), not text
                 model_arg, spec_arg = c.args[0], c.args[1]
                 spec_text = c.arg_text(f.masked, 1) or ""
                 if model_arg.present:
@@ -773,6 +829,9 @@ class Checker:
                     continue
                 kind, env = m.group(1), m.group(2).strip()
                 if kind == "begin" and env in TABLE_ENVS:
+                    if env == "array" and re.search(r"\\left\s*(\\[{|.]|[(\[|.])\s*$", f.masked[max(0, m.start() - 40):m.start()]):
+                        stack.append((env, dict(cur)))
+                        continue  # piecewise definition or matrix inside \left...\right: math, not a table
                     end = self._env_end(f, env, m.end())
                     body_text = f.masked[m.end():end] if end else ""
                     rows = _count_rows(body_text)
@@ -899,8 +958,14 @@ class Checker:
                 label = plain_text(f.masked[g:e]).strip()
                 if not 0 < len(label) <= 80:
                     continue
+                nxt = f.masked[le:le + 200].lstrip()
+                if re.match(r"(name|signature|date|id|nu id|score|grade|section|instructor)\b", label, re.I) and label.endswith(":") \
+                        or re.match(r"\\(hrulefill|rule|dotfill|underline|makebox|framebox|hspace)", nxt):
+                    continue  # a form field such as "Name: ____", not a heading
                 if re.match(r"^(problem|exercise|question|q|part)\s*\(?[0-9a-z]{1,3}\b", label, re.I):
                     continue
+                if re.match(r"^by\s", label, re.I):
+                    continue  # a byline under a title
                 out.append((f, pm.start(1) if pm.group(1) else pm.start(2), label))
         return out
 

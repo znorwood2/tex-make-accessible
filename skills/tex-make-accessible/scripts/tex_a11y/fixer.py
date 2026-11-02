@@ -20,6 +20,7 @@ def output_path(p: Path, suffix: str = SUFFIX) -> Path:
 @dataclass
 class FixResult:
     outputs: dict[Path, tuple[Path, str]] = field(default_factory=dict)   # original -> (new path, new text)
+    newlines: dict[Path, str] = field(default_factory=dict)              # new path -> line ending to write
     applied: list[Finding] = field(default_factory=list)
     conflicts: list[Edit] = field(default_factory=list)
     diff: str = ""
@@ -77,6 +78,9 @@ def fix(analysis: Analysis, main_output: Path | None = None, suffix: str = SUFFI
                         grew = True
 
     diffs = []
+    for sf in proj.files.values():  # files that are not UTF-8 must be rewritten as UTF-8 for LuaLaTeX
+        if sf.encoding != "utf-8":
+            by_file.setdefault(sf.path, [])
     for path, edits in by_file.items():
         src = proj.files[path]
         new_text, skipped = _apply(src.text, edits)
@@ -85,8 +89,9 @@ def fix(analysis: Analysis, main_output: Path | None = None, suffix: str = SUFFI
             dest = main_output or output_path(path, suffix)
         else:
             dest = output_path(path, suffix)
-        if new_text == src.text and path != proj.main.path:
+        if new_text == src.text and path != proj.main.path and src.encoding == "utf-8":
             continue
+        res.newlines[dest] = src.newline
         res.outputs[path] = (dest, new_text)
         diffs.extend(difflib.unified_diff(
             src.text.splitlines(keepends=True), new_text.splitlines(keepends=True),
@@ -104,4 +109,5 @@ def _rel(p: Path, root: Path) -> str:
 
 def write(res: FixResult) -> None:
     for _, (dest, text) in res.outputs.items():
-        dest.write_text(text, encoding="utf-8")
+        with open(dest, "w", encoding="utf-8", newline=res.newlines.get(dest, "\n")) as fh:
+            fh.write(text)
