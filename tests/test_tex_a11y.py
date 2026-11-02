@@ -93,7 +93,7 @@ class TestFixtures(unittest.TestCase):
         a = analyze(FIXTURES / "worksheet" / "worksheet.tex", OPTS)
         found = set(codes(a))
         for code in ("METADATA_MISSING", "ENGINE_COMMENT", "CONTRAST_LOW", "PDFTITLE_MISSING", "FONT_PDFTEX",
-                     "HYPERREF_NOT_LAST", "ENUMITEM", "DOLLAR_DISPLAY", "DOLLAR_UNPAIRED", "ALT_MISSING",
+                     "HYPERREF_NOT_LAST", "LIST_PACKAGE", "DOLLAR_DISPLAY", "DOLLAR_UNPAIRED", "ALT_MISSING",
                      "TABLE_NO_HEADERS", "HEADING_START", "FAKE_HEADING", "LINK_TEXT", "CONTRAST_NEAR_WHITE"):
             self.assertIn(code, found)
 
@@ -315,7 +315,7 @@ class TestBodyChecks(TempDoc):
             \end{document}
             """)
         a = analyze(p, OPTS)
-        self.assertIn("ENUMERATE_PKG", codes(a, "auto"))
+        self.assertIn("LIST_PACKAGE", codes(a, "auto"))
         self.assertNotIn("HYPERREF_NOT_LAST", codes(a))
 
     def test_line_endings_and_encoding_are_handled(self):
@@ -328,6 +328,25 @@ class TestBodyChecks(TempDoc):
         self.assertIn(b"\r\n", out)
         self.assertNotIn(b"\n", out.replace(b"\r\n", b""))
         self.assertIn("Café".encode("utf-8"), out)
+
+    def test_short_list_labels_are_rewritten(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage[shortlabels]{enumitem}
+            \title{T}
+            \begin{document}
+            \begin {enumerate} [(a)] \item x \end{enumerate}
+            \begin{enumerate}[(i), resume] \item y \end{enumerate}
+            \begin{enumerate}[{Step} 1.] \item z \end{enumerate}
+            \begin{enumerate}[label=(\Alph*)] \item w \end{enumerate}
+            \end{document}
+            """)
+        out = self.fixed(p)
+        self.assertIn(r"\begin {enumerate} [label=(\alph*)]", out)
+        self.assertIn(r"[label=(\roman*), resume]", out)
+        self.assertIn(r"[label=Step \arabic*.]", out)
+        self.assertIn(r"[label=(\Alph*)]", out)
+        self.assertNotIn("\n\\usepackage[shortlabels]{enumitem}", out)
 
     def test_not_main_file(self):
         p = self.doc("\\section{Only a chapter}\n")

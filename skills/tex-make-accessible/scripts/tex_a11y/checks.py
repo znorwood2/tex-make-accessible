@@ -447,38 +447,8 @@ class Checker:
                     self.add("FONT_SUGGEST", "warning", "manual", RANK_OTHER,
                              f"Font package '{n}' is written for pdfLaTeX. Under LuaLaTeX use OpenType fonts instead.",
                              f, c.start, hint=f"Suggested replacement: {suggest[n]}")
-            if "enumerate" in l.names:
-                uses_opts = re.search(r"\\begin\s*\{enumerate\}\s*\[", all_masked)
-                if uses_opts or len(l.names) > 1:
-                    self.add("ENUMERATE_PKG", "warning", "manual", RANK_OTHER,
-                             "The enumerate package is incompatible with tagging. Its short label syntax "
-                             "(e.g. \\begin{enumerate}[(a)]) needs rewriting as label=(\\alph*).", f, c.start,
-                             hint="Remove \\usepackage{enumerate} and write \\begin{enumerate}[label=(\\alph*)] "
-                                  "(the tagging code supports enumitem's label syntax).")
-                else:
-                    self.add("ENUMERATE_PKG", "warning", "auto", RANK_OTHER,
-                             "Removed the enumerate package: it is incompatible with tagging and the document doesn't use "
-                             "its label options.", f, c.start,
-                             edits=[_comment_out(f, c.start, c.end, "not used; incompatible with tagging")])
-            if "enumitem" in l.names:
-                uses = [cmd for cmd in ENUMITEM_PREAMBLE_CMDS if re.search(r"\\" + cmd + r"(?![A-Za-z])", all_masked)]
-                inline = "inline" in l.options or re.search(r"\\begin\{(enumerate|itemize|description)\*\}", all_masked)
-                msg = ("enumitem cannot currently be loaded with tagging, but the tagging code supports most of its "
-                       "document-level syntax (e.g. \\begin{enumerate}[label=(\\alph*)]).")
-                if uses or inline or len(l.names) > 1:
-                    if uses:
-                        why = "uses " + ", ".join("\\" + u for u in uses)
-                    elif inline:
-                        why = "uses inline lists"
-                    else:
-                        why = "loads it together with other packages"
-                    self.add("ENUMITEM", "warning", "manual", RANK_OTHER,
-                             msg + f" The document {why}, so it needs a manual change.", f, c.start,
-                             hint="Remove \\usepackage{enumitem} and move list settings into each list's options.")
-                else:
-                    self.add("ENUMITEM", "warning", "auto", RANK_OTHER,
-                             msg + " Removed \\usepackage{enumitem}; list options in the body are kept.", f, c.start,
-                             edits=[_comment_out(f, c.start, c.end, "tagging supports its list syntax without the package")])
+            if "enumerate" in l.names or "enumitem" in l.names:
+                self._list_packages(l, all_masked)
             for n in l.names:
                 if n in handled:
                     continue
@@ -502,6 +472,59 @@ class Checker:
                     self.add("PACKAGE_UNKNOWN", "info", "none", RANK_OTHER,
                              f"Package '{n}' has not been checked by the tagging project"
                              + (" (not in the status list)." if status is None else "."), f, c.start)
+
+    def _short_label_edits(self) -> tuple[list[Edit], int, bool]:
+        """Rewrite short list labels such as [(a)] (enumerate package, enumitem's shortlabels) as label=(\\alph*)."""
+        edits, n, resume = [], 0, False
+        for sp in self.body:
+            f = sp.file
+            for m in re.finditer(r"\\begin\s*\{enumerate\}\s*(?=\[)", f.masked[sp.start:sp.end]):
+                o = sp.start + m.end()
+                e = read_group(f.masked, o, "[", "]")
+                if e is None:
+                    continue
+                inner = f.masked[o + 1:e - 1]
+                items = [inner[x:y] for x, y in split_top_level(inner)]
+                out, changed = [], False
+                for it in items:
+                    st = it.strip()
+                    if st.startswith("resume"):
+                        resume = True
+                    lab = _short_label(st)
+                    if lab is None:
+                        out.append(it)
+                    else:
+                        out.append(("label={" + lab + "}") if ("," in lab or "=" in lab) else ("label=" + lab))
+                        changed = True
+                if changed:
+                    edits.append(Edit(f.path, o + 1, e - 1, ", ".join(x.strip() for x in out)))
+                    n += 1
+        return edits, n, resume
+
+    def _list_packages(self, l: PackageLoad, all_masked: str) -> None:
+        f, c = l.file, l.cmd
+        short = "enumerate" in l.names or "shortlabels" in l.options
+        label_edits, n, resume = self._short_label_edits() if short else ([], 0, False)
+        uses = [cmd for cmd in ENUMITEM_PREAMBLE_CMDS if re.search(r"\\" + cmd + r"(?![A-Za-z])", all_masked)] \
+            if "enumitem" in l.names else []
+        inline = "enumitem" in l.names and ("inline" in l.options
+                                            or re.search(r"\\begin\{(enumerate|itemize|description)\*\}", all_masked))
+        names = " and ".join(x for x in ("enumerate", "enumitem") if x in l.names)
+        msg = (f"{names} cannot be loaded with tagging, but the tagging code supports enumitem's document-level "
+               "list syntax (e.g. \\begin{enumerate}[label=(\\alph*)]).")
+        if uses or inline or len(set(l.names) - {"enumerate", "enumitem"}) > 0:
+            why = ("uses " + ", ".join("\\" + u for u in uses)) if uses else (
+                "uses inline lists" if inline else "loads it together with other packages")
+            self.add("LIST_PACKAGE", "warning", "manual", RANK_OTHER, msg + f" The document {why}, so it needs a manual change.",
+                     f, c.start, hint="Remove the package and move list settings into each list's options "
+                                      "(short labels like [(a)] become [label=(\\alph*)]).")
+            return
+        extra = f" Rewrote {n} short list label(s) such as [(a)] as label=(\\alph*)." if n else ""
+        if resume:
+            extra += " Some lists use 'resume': check the numbering continues correctly after compiling."
+        self.add("LIST_PACKAGE", "warning", "auto", RANK_OTHER, msg + f" Removed \\usepackage{{{names}}}." + extra,
+                 f, c.start, edits=[_comment_out(f, c.start, c.end, "tagging supports its list syntax without the package")]
+                 + label_edits)
 
     # ---------- hyperref ----------
     def check_hyperref(self) -> None:
@@ -1053,6 +1076,29 @@ class Checker:
         self.a.add(Finding("PREAMBLE_ADDITIONS", "info", "auto", RANK_OTHER,
                            "Added settings at the end of the preamble: " + "; ".join(l.split(" %")[0] for l in lines),
                            self.p.rel(main), main.line(ls), edits=[Edit(main.path, ls, ls, block, order=90)]))
+
+
+_COUNTERS = {"1": "\\arabic*", "a": "\\alph*", "A": "\\Alph*", "i": "\\roman*", "I": "\\Roman*"}
+
+
+def _short_label(item: str) -> str | None:
+    """Translate one enumerate-style short label, e.g. '(a)' -> '(\\alph*)'. None if it is not one."""
+    if not item or "=" in item or "\\" in item or re.fullmatch(r"[A-Za-z*-]{2,}", item):
+        return None  # a key such as resume or nosep, or something we don't recognise
+    out, done, depth = [], False, 0
+    for ch in item:
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            continue
+        if not done and depth == 0 and ch in _COUNTERS:
+            out.append(_COUNTERS[ch])
+            done = True
+        else:
+            out.append(ch)
+    return "".join(out) if done else None
 
 
 def split_top_level_str(s: str) -> list[str]:
