@@ -403,6 +403,25 @@ class TestBodyChecks(TempDoc):
         out2 = self.fixed(p2)
         self.assertLess(out2.index(r"\usepackage{xcolor}"), out2.index(r"\definecolor{a11yred}"))
 
+    def test_nested_proof_refs_in_headings_and_amsart_toc(self):
+        p = self.doc(r"""
+            \documentclass{amsart}
+            \usepackage{amsthm,hyperref}
+            \title{T}
+            \begin{document}
+            \tableofcontents
+            \section{Answer to \ref{q1}}
+            \begin{enumerate}\item a \begin{enumerate}\item b
+            \begin{proof} x \end{proof}
+            \end{enumerate}\end{enumerate}
+            \end{document}
+            """)
+        a = analyze(p, OPTS)
+        self.assertIn("AMSART_TOC", codes(a, "manual"))
+        out = self.fixed(p)
+        self.assertIn(r"\DeclareInstanceCopy{block}{proof-3}{proof-2}", out)
+        self.assertIn(r"\section{Answer to \ref*{q1}}", out)
+
     def test_not_main_file(self):
         p = self.doc("\\section{Only a chapter}\n")
         self.assertEqual(codes(analyze(p, OPTS)), ["NOT_MAIN_FILE"])

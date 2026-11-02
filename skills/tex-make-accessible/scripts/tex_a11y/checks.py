@@ -178,6 +178,9 @@ class Checker:
         self.check_display_math()
         self.check_math_env_macros()
         self.check_display_in_center()
+        self.check_nested_proofs()
+        self.check_refs_in_headings()
+        self.check_amsart_toc()
         self.check_links()
         self.finish_end_preamble()
         return self.a
@@ -1110,6 +1113,57 @@ class Checker:
                     self.add("DISPLAY_IN_CENTER", "error", "manual", RANK_TAGGING,
                              "Display math inside a center environment breaks tagging (compile error 'para hooks "
                              "differ'). Move the display math out of the center environment.", f, b0)
+
+    def check_nested_proofs(self) -> None:
+        """A proof inside lists nested two deep fails with "instance 'proof-3' of type 'block' is unknown"
+        (TeX Live 2026). Declaring the deeper levels as copies of proof-2 fixes it."""
+        lists = ("enumerate", "itemize", "description")
+        depth, deepest, where = 0, 0, None
+        for sp in self.body:
+            f = sp.file
+            for m in re.finditer(r"\\(begin|end)\s*\{(enumerate|itemize|description|proof)\}", f.masked[sp.start:sp.end]):
+                if m.group(2) in lists:
+                    depth += 1 if m.group(1) == "begin" else -1
+                elif m.group(1) == "begin" and depth >= 2 and depth > deepest:
+                    deepest, where = depth, (f, sp.start + m.start())
+        if not deepest:
+            return
+        lines = ["\\DeclareInstanceCopy{block}{proof-%d}{proof-2}" % k for k in range(3, deepest + 2)]
+        self.end_preamble_lines["hyperref"].extend(lines)
+        f, pos = where
+        self.add("NESTED_PROOF", "error", "auto", RANK_TAGGING,
+                 f"A proof inside lists nested {deepest} deep stops the compile with tagging on (\"instance "
+                 f"'proof-{deepest + 1}' of type 'block' is unknown\"). Added {', '.join(lines)} to the preamble.",
+                 f, pos)
+
+    def check_refs_in_headings(self) -> None:
+        """\\ref in a heading becomes a link inside the table-of-contents/bookmark link (invalid nesting)."""
+        if not self.loaded("hyperref") and not any(x.code == "HYPERREF_MISSING" for x in self.a.findings):
+            return
+        edits = []
+        for name in HEADING_LEVELS:
+            for f, c, _ in _cmds_in_spans(self.body, name, "om"):
+                a, b = c.args[1].inner
+                for m in re.finditer(r"\\(ref|eqref|pageref)(?![A-Za-z*])", f.masked[a:b]):
+                    edits.append(Edit(f.path, a + m.end(), a + m.end(), "*"))
+        if edits:
+            self.add("REF_IN_HEADING", "warning", "auto", RANK_OTHER,
+                     f"{len(edits)} heading(s) contain \\ref, which makes a link inside the contents or bookmark link "
+                     "(invalid in tagged PDF). Changed them to \\ref*, which prints the same number without a link.",
+                     self.p.files[edits[0].path], edits[0].start, edits=edits)
+
+    def check_amsart_toc(self) -> None:
+        if self.doc_class not in ("amsart", "amsbook", "amsproc"):
+            return
+        toc = _cmds_in_spans(self.body, "tableofcontents")
+        if toc:
+            f, c, _ = toc[0]
+            self.add("AMSART_TOC", "error", "manual", RANK_TAGGING,
+                     f"\\tableofcontents in {self.doc_class} breaks tagging (TeX Live 2026: errors at every numbered "
+                     "heading). Switch the class to article (which handles the contents correctly), or remove the "
+                     "table of contents; PDF bookmarks still give readers an outline.", f, c.start,
+                     hint="Switching to article needs small stand-ins for amsart-only commands such as \\address "
+                          "and \\email, and changes the page layout; confirm with the author.")
 
     # ---------- links ----------
     def check_links(self) -> None:
