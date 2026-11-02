@@ -348,6 +348,61 @@ class TestBodyChecks(TempDoc):
         self.assertIn(r"[label=(\Alph*)]", out)
         self.assertNotIn("\n\\usepackage[shortlabels]{enumitem}", out)
 
+    def test_equation_shortcut_macros_are_expanded(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \newcommand{\beq}{\begin{equation}}
+            \newcommand{\eeq}{\end{equation}}
+            \def\bal{\begin{align*}}
+            \title{T}
+            \begin{document}
+            \beq x=1 \eeq
+            \bal a&=b \end{align*}
+            \end{document}
+            """)
+        out = self.fixed(p)
+        self.assertIn(r"\begin{equation} x=1 \end{equation}", out)
+        self.assertIn(r"\begin{align*} a&=b", out)
+        self.assertIn(r"\newcommand{\beq}{\begin{equation}}", out)  # definition kept
+
+    def test_display_math_in_center(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \title{T}
+            \begin{document}
+            \begin{center}
+            \begin{align*} a&=b \end{align*}
+            \end{center}
+            \begin{center}
+            Text and \[ x \]
+            \end{center}
+            \begin{center} Just text \end{center}
+            \end{document}
+            """)
+        a = analyze(p, OPTS)
+        found = [(f.code, f.action) for f in a.findings if f.code == "DISPLAY_IN_CENTER"]
+        self.assertEqual(sorted(found), [("DISPLAY_IN_CENTER", "auto"), ("DISPLAY_IN_CENTER", "manual")])
+        out = self.fixed(p)
+        self.assertEqual(out.count(r"\begin{center}"), 2)
+
+    def test_color_definitions_come_before_first_use(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage{color}
+            \usepackage[colorlinks]{hyperref}
+            \hypersetup{citecolor=red}
+            \title{T}
+            \begin{document}
+            {\color{orange} x}
+            \end{document}
+            """)
+        out = self.fixed(p)
+        self.assertLess(out.index(r"\definecolor{a11yred}"), out.index(r"citecolor=a11yred"))
+        self.assertLess(out.index(r"\usepackage{color}"), out.index(r"\definecolor{a11yorange}"))
+        p2 = self.doc("\\documentclass{article}\n\\usepackage[colorlinks]{hyperref}\n\\title{T}\n\\begin{document}\nx\n\\end{document}\n", "nocolor.tex")
+        out2 = self.fixed(p2)
+        self.assertLess(out2.index(r"\usepackage{xcolor}"), out2.index(r"\definecolor{a11yred}"))
+
     def test_not_main_file(self):
         p = self.doc("\\section{Only a chapter}\n")
         self.assertEqual(codes(analyze(p, OPTS)), ["NOT_MAIN_FILE"])

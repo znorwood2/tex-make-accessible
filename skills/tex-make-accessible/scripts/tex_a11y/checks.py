@@ -176,6 +176,8 @@ class Checker:
         self.check_tables()
         self.check_headings()
         self.check_display_math()
+        self.check_math_env_macros()
+        self.check_display_in_center()
         self.check_links()
         self.finish_end_preamble()
         return self.a
@@ -995,13 +997,9 @@ class Checker:
     def _page_estimate(self) -> tuple[int, str]:
         pdf = self.p.main.path.with_suffix(".pdf")
         if pdf.is_file():
-            try:
-                raw = pdf.read_bytes()
-                n = len(re.findall(rb"/Type\s*/Page(?![s\w])", raw))
-                if n:
-                    return n, f"counted in {pdf.name}"
-            except OSError:
-                pass
+            n = _pdf_page_count(pdf)
+            if n:
+                return n, f"counted in {pdf.name}"
         words = 0
         displays = 0
         breaks = 0
@@ -1047,6 +1045,72 @@ class Checker:
                          "$$...$$ is plain-TeX display math; replaced with \\[...\\].", f, a,
                          edits=[Edit(f.path, a, a + 2, "\\["), Edit(f.path, b, b + 2, "\\]")])
 
+    # ---------- macros that hide \\begin{equation} / \\end{equation} ----------
+    MATH_ENVS = ("equation", "equation*", "align", "align*", "gather", "gather*", "multline", "multline*",
+                 "flalign", "flalign*", "alignat", "alignat*", "eqnarray", "eqnarray*", "displaymath", "math")
+
+    def check_math_env_macros(self) -> None:
+        """With MathML tagging, math environments read their body as an argument, so \\end{equation}
+        must appear literally. Shortcuts like \\newcommand{\\beq}{\\begin{equation}} break; expand their uses."""
+        envs = "|".join(re.escape(e) for e in self.MATH_ENVS)
+        defs = re.compile(r"\\(?:newcommand|renewcommand|providecommand)\*?\s*\{?\s*\\([A-Za-z@]+)\s*\}?\s*\{\s*(\\(?:begin|end)\s*\{(?:" + envs + r")\})\s*\}"
+                          r"|\\def\s*\\([A-Za-z@]+)\s*\{\s*(\\(?:begin|end)\s*\{(?:" + envs + r")\})\s*\}")
+        macros: dict[str, str] = {}
+        for sp in self.pre + self.body:
+            for m in defs.finditer(sp.file.masked, sp.start, sp.end):
+                name = m.group(1) or m.group(3)
+                macros[name] = re.sub(r"\s+", "", m.group(2) or m.group(4))
+        if not macros:
+            return
+        def_spans = [(m.start(), m.end(), sp.file.path) for sp in self.pre + self.body
+                     for m in defs.finditer(sp.file.masked, sp.start, sp.end)]
+        for name, expansion in macros.items():
+            edits = []
+            for sp in self.body:
+                f = sp.file
+                for m in re.finditer(r"\\" + re.escape(name) + r"(?![A-Za-z@])", f.masked[sp.start:sp.end]):
+                    a = sp.start + m.start()
+                    if any(p == f.path and s0 <= a < e0 for s0, e0, p in def_spans):
+                        continue
+                    edits.append(Edit(f.path, a, sp.start + m.end(), expansion))
+            if edits:
+                self.add("MATH_ENV_MACRO", "error", "auto", RANK_TAGGING,
+                         f"\\{name} is a shortcut for {expansion}. With MathML tagging, math environments must be "
+                         f"written out, so each of the {len(edits)} use(s) was replaced by {expansion}.",
+                         edits[0].path and self.p.files[edits[0].path], edits[0].start, edits=edits)
+
+    DISPLAY_ENVS = ("equation", "equation*", "align", "align*", "gather", "gather*", "multline", "multline*",
+                    "flalign", "flalign*", "alignat", "alignat*", "eqnarray", "eqnarray*", "displaymath")
+
+    def check_display_in_center(self) -> None:
+        """Display math inside a center environment breaks tagging (tested with TeX Live 2026:
+        'para hooks differ' error and unclosed structures). Display math is centred anyway."""
+        envs = "|".join(re.escape(e) for e in self.DISPLAY_ENVS)
+        disp = re.compile(r"\\\[.*?\\\]|\\begin\s*\{(" + envs + r")\}.*?\\end\s*\{\1\}", re.S)
+        filler = re.compile(r"(\s|\\(vspace|vskip)\*?\s*\{[^}]*\}|\\(medskip|smallskip|bigskip|noindent|par)(?![A-Za-z]))*")
+        for sp in self.body:
+            f = sp.file
+            for m in re.finditer(r"\\begin\s*\{center\}", f.masked[sp.start:sp.end]):
+                b0 = sp.start + m.start()
+                b1 = sp.start + m.end()
+                e0 = self._env_end(f, "center", b1)
+                if e0 is None:
+                    continue
+                inner = f.masked[b1:e0]
+                if not disp.search(inner):
+                    continue
+                rest = disp.sub(" ", inner)
+                e1 = f.masked.index("}", e0) + 1
+                if filler.fullmatch(rest):
+                    self.add("DISPLAY_IN_CENTER", "error", "auto", RANK_TAGGING,
+                             "Display math inside a center environment breaks tagging (compile error 'para hooks "
+                             "differ'). Display math is centred anyway, so the center environment was removed.",
+                             f, b0, edits=[Edit(f.path, b0, b1, ""), Edit(f.path, e0, e1, "")])
+                else:
+                    self.add("DISPLAY_IN_CENTER", "error", "manual", RANK_TAGGING,
+                             "Display math inside a center environment breaks tagging (compile error 'para hooks "
+                             "differ'). Move the display math out of the center environment.", f, b0)
+
     # ---------- links ----------
     def check_links(self) -> None:
         bad = {"here", "click here", "link", "this link", "this", "website", "this website", "page", "this page", "url"}
@@ -1059,10 +1123,35 @@ class Checker:
                          data={"question": "link-text", "url": url, "text": txt})
 
     # ---------- end of preamble ----------
+    COLOR_PROVIDERS = {"xcolor", "color", "tikz", "pgf", "pgfplots", "tcolorbox", "colortbl", "mdframed", "listings"}
+
+    def _color_definitions_edit(self, defs: list[str]) -> Edit | None:
+        """Put new colour definitions right after the package that provides \\definecolor, so that every
+        later use (including \\hypersetup, which resolves colours at once) can see them."""
+        main = self.p.main
+        prov = next((l for l in self.loads if set(l.names) & self.COLOR_PROVIDERS), None)
+        block = "% tex-a11y: darker text colours (WCAG 4.5:1 contrast on white)\n" + "\n".join(defs) + "\n"
+        if prov is None:
+            if self.bd is None:
+                return None
+            ls = main.text.rfind("\n", 0, self.bd) + 1
+            return Edit(main.path, ls, ls, "\\usepackage{xcolor}\n" + block, order=80)
+        f = prov.file
+        _, le = _whole_line_span(f, prov.cmd.start, prov.cmd.end)
+        if not _own_lines(f, prov.cmd.start, prov.cmd.end):
+            le = prov.cmd.end
+            block = "\n" + block
+        return Edit(f.path, le, le, block, order=20)
+
     def finish_end_preamble(self) -> None:
         lines = []
         lines += self.end_preamble_lines["hyperref"]
-        lines += self.end_preamble_lines["colors"]
+        if self.end_preamble_lines["colors"]:
+            e = self._color_definitions_edit(self.end_preamble_lines["colors"])
+            if e is not None:
+                self.a.add(Finding("COLOR_DEFINITIONS", "info", "auto", RANK_CONTRAST,
+                                   "Defined darker colours: " + "; ".join(l.split(" %")[0] for l in self.end_preamble_lines["colors"]),
+                                   self.p.rel(self.p.files[e.path]), self.p.files[e.path].line(e.start), edits=[e]))
         if self.hypersetup_items:
             lines.append("\\hypersetup{" + ", ".join(self.hypersetup_items) + "}")
         if not lines or self.bd is None:
@@ -1099,6 +1188,24 @@ def _short_label(item: str) -> str | None:
         else:
             out.append(ch)
     return "".join(out) if done else None
+
+
+def _pdf_page_count(pdf: Path) -> int:
+    """Count page objects, including those inside compressed object streams (stdlib only)."""
+    import zlib
+    try:
+        raw = pdf.read_bytes()
+    except OSError:
+        return 0
+    pat = re.compile(rb"/Type\s*/Page(?![s\w])")
+    n = len(pat.findall(raw))
+    for m in re.finditer(rb"/Type\s*/ObjStm.*?stream\r?\n", raw, re.S):
+        end = raw.find(b"endstream", m.end())
+        try:
+            n += len(pat.findall(zlib.decompress(raw[m.end():end])))
+        except zlib.error:
+            continue
+    return n
 
 
 def split_top_level_str(s: str) -> list[str]:
