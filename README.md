@@ -2,7 +2,7 @@
 
 Tools and an AI skill (for Claude and ChatGPT) that help UNL math colleagues fix LaTeX source so it compiles to accessible, tagged PDFs. The target is WCAG 2.1 AA; a 100% Anthology Ally score in Canvas is the first milestone.
 
-**Status:** early development. The command-line checker and fixer (`tex-a11y check` / `tex-a11y fix`) work; the AI skill itself is not written yet. See [PLAN.md](PLAN.md).
+**Status:** early development. The command-line checker and fixer (`tex-a11y check` / `tex-a11y fix`) and the skill ([`SKILL.md`](skills/tex-make-accessible/SKILL.md)) are written and have been tested on department documents compiled with TeX Live 2026. Install guides for Claude and ChatGPT are next. See [PLAN.md](PLAN.md).
 
 ## Try it
 

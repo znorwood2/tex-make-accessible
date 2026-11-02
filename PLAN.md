@@ -215,7 +215,8 @@ tex-make-accessible/
 
 1. **Test corpus.** Collect 10–15 typical department `.tex` files (syllabus, exam, worksheet, problem set, notes) with the authors' permission, and remove names and student information. The Service Course Repository's Accessibility folder is a natural starting point.
 2. **`tex-a11y check` and `fix` (automatic fixes only) + `packages.json`.** *First version done; tested on made-up fixtures and the 127 documents in the OER repo.* Run them on the corpus to find the most common problems and judgment calls. Re-run a few Ally probes with the canonical preamble (see Architecture 8). This alone gives a usable, no-AI tool.
-3. **Questions file, `apply`, `build` and `PROMPT.md`.** Test the questions file on a free Claude and a free ChatGPT account to make sure it fits comfortably in one conversation.
+3. **`SKILL.md` and reference files** (`reference/compile-errors.md`, `reference/alt-text.md`). *First version done; the workflow and recipes come from converting the first department samples (8 documents, including Beamer to ltx-talk), all compiled with TeX Live 2026 and checked with pdfcheck. No sample content is in the repository.*
+3b. **Questions file, `apply`, `build` and `PROMPT.md`.** Test the questions file on a free Claude and a free ChatGPT account to make sure it fits comfortably in one conversation.
 4. **`SKILL.md` and reference files**, written around what steps 2–3 find and cross-linked to the resource page. Release the Claude skill (zip and Claude Code plugin).
 5. **Pilot** with 2–3 colleagues, including one on free Claude and one on ChatGPT Edu. Success means their documents reach Ally 100 and pass veraPDF, with alt text they're happy to sign off.
 6. **ChatGPT Skills install guide**, once UNL IT confirms Skills are enabled for Edu.
