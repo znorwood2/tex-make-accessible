@@ -422,6 +422,15 @@ class TestBodyChecks(TempDoc):
         self.assertIn(r"\DeclareInstanceCopy{block}{proof-3}{proof-2}", out)
         self.assertIn(r"\section{Answer to \ref*{q1}}", out)
 
+    def test_ltx_talk_provides_hyperref_and_xcolor(self):
+        p = self.doc("\\documentclass{ltx-talk}\n\\title{T}\n\\begin{document}\n\\begin{frame}{\\color{orange} x}\\end{frame}\n\\end{document}\n")
+        a = analyze(p, OPTS)
+        self.assertNotIn("HYPERREF_MISSING", codes(a))
+        out = self.fixed(p)
+        self.assertNotIn(r"\usepackage{hyperref}", out)
+        self.assertNotIn(r"\usepackage{xcolor}", out)
+        self.assertIn(r"\definecolor{a11yorange}", out)
+
     def test_not_main_file(self):
         p = self.doc("\\section{Only a chapter}\n")
         self.assertEqual(codes(analyze(p, OPTS)), ["NOT_MAIN_FILE"])

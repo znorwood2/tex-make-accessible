@@ -35,6 +35,10 @@ SAFE_AFTER_HYPERREF = {
     "etoolbox", "environ", "xparse", "ifthen", "calc", "xspace", "totcount", "comment", "verbatim",
     "kvoptions", "xkeyval", "pgfkeys", "iftex", "ifpdf", "ifluatex", "booktabs", "array", "multirow",
 }
+# Packages that a document class loads itself.
+CLASS_PROVIDES = {
+    "ltx-talk": {"hyperref", "xcolor", "graphicx", "amsmath", "mathtools", "fontspec", "unicode-math", "geometry"},
+}
 BOOKLIKE_CLASSES = {"report", "book", "memoir", "scrreprt", "scrbook", "amsbook"}
 TABLE_ENVS = ("tabular", "tabular*", "tabularx", "tabulary", "longtable", "array")
 HEADING_LEVELS = {"chapter": 0, "section": 1, "subsection": 2, "subsubsection": 3, "paragraph": 4, "subparagraph": 5}
@@ -147,6 +151,9 @@ class Checker:
 
     def loaded(self, name: str) -> list[PackageLoad]:
         return [l for l in self.loads if name in l.names]
+
+    def class_provides(self, name: str) -> bool:
+        return name in CLASS_PROVIDES.get(self.doc_class or "", set())
 
     # ---------- run ----------
     def run(self) -> Analysis:
@@ -535,6 +542,8 @@ class Checker:
     def check_hyperref(self) -> None:
         hl = self.loaded("hyperref")
         main = self.p.main
+        if not hl and self.class_provides("hyperref"):
+            return
         if not hl:
             after = [l for l in self.loads if set(l.names) & AFTER_HYPERREF]
             if after and after[0].file is main and _own_lines(main, after[0].cmd.start, after[0].cmd.end):
@@ -1185,6 +1194,11 @@ class Checker:
         main = self.p.main
         prov = next((l for l in self.loads if set(l.names) & self.COLOR_PROVIDERS), None)
         block = "% tex-a11y: darker text colours (WCAG 4.5:1 contrast on white)\n" + "\n".join(defs) + "\n"
+        if prov is None and self.class_provides("xcolor"):
+            if self.bd is None:
+                return None
+            ls = main.text.rfind("\n", 0, self.bd) + 1
+            return Edit(main.path, ls, ls, block, order=80)
         if prov is None:
             if self.bd is None:
                 return None
