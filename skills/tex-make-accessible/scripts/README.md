@@ -60,6 +60,6 @@ Package and class support comes from the LaTeX Project's [tagging status list](h
 
 The tool reads TeX source with patterns, not with TeX itself, so:
 
-- **Macros can hide things.** It can't see through custom macros that hide `\section`, `\includegraphics` or colours, and it may miss or misplace something in unusual code.
+- **Macros can hide things.** It recognizes a preamble macro whose definition is a single heading (e.g. `\newcommand{\lecture}[1]{\newpage\section{#1}}`) as that heading. Otherwise it can't see through custom macros that hide `\section`, `\includegraphics` or colours, and it may miss or misplace something in unusual code.
 - **Page counts are estimates** unless a compiled PDF sits next to the `.tex` file.
 - **A clean report isn't the end.** Always compile the result and check it with `pdfcheck --canvas` or in Ally.

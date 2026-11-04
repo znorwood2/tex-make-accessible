@@ -7,7 +7,7 @@ Ally only checks that alt text exists and isn't a filename. Quality is up to you
 ## How to write it
 
 1. **Read the context first:** the caption, the paragraph that refers to the figure, and the problem it belongs to. The same graph needs different alt text in a lesson ("shows that the curve has a minimum near x = 1.2") and in an exam question that asks the student to find the minimum (describe the curve without giving the answer away).
-2. **Look at the image** if you can: render EPS/PDF to PNG if needed. Never describe an image you haven't seen; ask instead.
+2. **Look at the image** if you can: render EPS/PDF to PNG if needed. Never present a description of an image you haven't seen as final. If the image files are missing (`GRAPHICS_MISSING`), ask for them. If the author wants a draft anyway, write it from the math and the surrounding text, keep it to what the text supports, and list each such figure in the hand-off as unverified.
 3. **Say what kind of figure it is,** then the essentials:
    - **Graph or plot:** the axes (quantity and range), each curve or series, the overall trend, and key values (intercepts, maxima, where curves cross or diverge). Say how curves compare.
    - **Histogram or bar chart:** what's counted, the shape (decreasing, bell-shaped, skewed), centre and spread, and notable values.
@@ -20,6 +20,7 @@ Ally only checks that alt text exists and isn't a filename. Quality is up to you
 7. **Decorative graphics** (logos, ornaments, page decorations) get `artifact` instead of alt text.
 8. **Check boxes and other form elements** drawn with TikZ: a short alt text such as "check box".
 9. **An image of a table is not a figure.** Replace it with a real table.
+10. **Answer choices drawn as images** (e.g. "Which of these is the phase line?"): each choice needs enough detail to tell it apart from the others, because a student has to choose between them. "Phase line (b)" is not enough; give the equilibria and the arrow directions. Describe the wrong choices as carefully as the right one, and don't mark which is correct.
 
 ## Syntax
 

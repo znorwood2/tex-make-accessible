@@ -436,5 +436,103 @@ class TestBodyChecks(TempDoc):
         self.assertEqual(codes(analyze(p, OPTS)), ["NOT_MAIN_FILE"])
 
 
+class TestLectureNotesFindings(TempDoc):
+    """Cases found while converting a 117-page set of lecture notes."""
+
+    def test_heading_macro_counts_as_heading(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \newcommand{\lecture}[2]{\newpage \section{Lecture #1: #2}}
+            \begin{document}
+            \lecture{1}{Intro}
+            \subsection*{Differential equations}
+            \end{document}
+            """)
+        self.assertNotIn("HEADING_START", codes(analyze(p, OPTS)))
+
+    def test_heading_inside_theorem(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \newtheorem{ex}{Example}
+            \begin{document}
+            \section{One}
+            \begin{ex} Text.
+            \subsection*{Discussion Question} More.
+            \end{ex}
+            \subsection*{Fine here}
+            \begin{proof} \paragraph{Bad too} x \end{proof}
+            \end{document}
+            """)
+        found = [f for f in analyze(p, OPTS).findings if f.code == "HEADING_IN_THEOREM"]
+        self.assertEqual([f.line for f in found], [6, 9])
+
+    def test_duplicate_starred_theorem(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage{amsthm}
+            \newtheorem{thm}{Theorem}
+            \newtheorem*{thm*}{Theorem}
+            \newtheorem{ax}{Axiom}
+            \newtheorem*{ax*}{Axioms}
+            \begin{document}
+            x
+            \end{document}
+            """)
+        a = analyze(p, OPTS)
+        dup = sorted((f.action, f.line) for f in a.findings if f.code == "THEOREM_STAR_DUP")
+        self.assertEqual(dup, [("auto", 4), ("manual", 6)])
+        out = self.fixed(p)
+        self.assertIn(r"% tex-a11y removed: \newtheorem*{thm*}{Theorem}", out)
+        self.assertIn("\n\\newtheorem*{ax*}{Axioms}", out)
+
+    def test_unused_incompatible_package_removed(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage{amscd}
+            \usepackage[all]{xy}
+            \xyoption{arc}
+            \begin{document}
+            x
+            \end{document}
+            """)
+        a = analyze(p, OPTS)
+        self.assertEqual(codes(a, "auto").count("PACKAGE_UNUSED"), 2)
+        self.assertNotIn("PACKAGE_INCOMPATIBLE", codes(a))
+        out = self.fixed(p)
+        self.assertIn(r"% tex-a11y removed: \xyoption{arc}", out)
+        self.assertNotIn("\n\\usepackage[all]{xy}", out)
+
+    def test_used_incompatible_package_kept(self):
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage{framed,amscd}
+            \begin{document}
+            \begin{framed} x \end{framed}
+            \end{document}
+            """)
+        a = analyze(p, OPTS)
+        self.assertIn("PACKAGE_INCOMPATIBLE", codes(a))
+        self.assertIn("PACKAGE_UNUSED", codes(a))
+        self.assertIn(r"\usepackage{framed}", self.fixed(p))
+
+    def test_missing_graphics(self):
+        (self.dir / "figs").mkdir()
+        (self.dir / "figs" / "here.png").write_bytes(b"")
+        (self.dir / "eu3.5.png").write_bytes(b"")
+        p = self.doc(r"""
+            \documentclass{article}
+            \usepackage{graphicx}
+            \graphicspath{{figs/}}
+            \begin{document}
+            \includegraphics[alt={A}]{here}
+            \includegraphics[alt={B}]{eu3.5}
+            \includegraphics[alt={C}]{gone}
+            \end{document}
+            """)
+        found = [f for f in analyze(p, OPTS).findings if f.code == "GRAPHICS_MISSING"]
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0].data["missing"], ["gone"])
+
+
 if __name__ == "__main__":
     unittest.main()
