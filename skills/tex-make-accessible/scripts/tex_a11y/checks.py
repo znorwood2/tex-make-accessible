@@ -42,6 +42,18 @@ CLASS_PROVIDES = {
 BOOKLIKE_CLASSES = {"report", "book", "memoir", "scrreprt", "scrbook", "amsbook"}
 TABLE_ENVS = ("tabular", "tabular*", "tabularx", "tabulary", "longtable", "array")
 HEADING_LEVELS = {"chapter": 0, "section": 1, "subsection": 2, "subsubsection": 3, "paragraph": 4, "subparagraph": 5}
+# Packages that are incompatible with tagging, with a pattern that shows the document uses them.
+# If the pattern never matches, the package is probably a leftover from a template and can go.
+PACKAGE_USE_SIGNS = {
+    "xy": r"\\(xymatrix|xygraph|xy|xybox|xyoption)(?![A-Za-z])|\\begin\s*\{xy\}",
+    "amscd": r"\\begin\s*\{CD\}",
+    "framed": r"\\begin\s*\{(framed|oframed|shaded\*?|snugshade\*?|leftbar|titled-frame|framedeq)\}",
+    "mdframed": r"\\begin\s*\{mdframed\}|\\newmdenv|\\surroundwithmdframed|\\mdfdefinestyle",
+}
+# Package options/commands that only matter when the package is loaded (removed together with it).
+PACKAGE_COMPANION_CMDS = {"xy": ("xyoption", "SelectTips", "CompileMatrices", "UseTips")}
+GRAPHIC_EXTS = (".pdf", ".png", ".jpg", ".jpeg", ".eps", ".jbig2", ".jb2", ".svg")
+
 ENUMITEM_PREAMBLE_CMDS = ("setlist", "newlist", "renewlist", "setitemize", "setenumerate", "setdescription",
                           "SetEnumitemKey", "SetEnumitemValue", "AddEnumerateCounter", "SetLabelAlign")
 
@@ -180,8 +192,11 @@ class Checker:
         self.check_title()
         self.check_contrast()
         self.check_figures()
+        self.check_graphics_files()
         self.check_tables()
         self.check_headings()
+        self.check_headings_in_theorems()
+        self.check_theorem_stars()
         self.check_display_math()
         self.check_math_env_macros()
         self.check_display_in_center()
@@ -461,8 +476,9 @@ class Checker:
                              f, c.start, hint=f"Suggested replacement: {suggest[n]}")
             if "enumerate" in l.names or "enumitem" in l.names:
                 self._list_packages(l, all_masked)
+            unused = self._unused_packages(l, all_masked)
             for n in l.names:
-                if n in handled:
+                if n in handled or n in unused:
                     continue
                 rec = self.packages_db["package"].get(n)
                 status = rec.get("status") if rec else None
@@ -484,6 +500,52 @@ class Checker:
                     self.add("PACKAGE_UNKNOWN", "info", "none", RANK_OTHER,
                              f"Package '{n}' has not been checked by the tagging project"
                              + (" (not in the status list)." if status is None else "."), f, c.start)
+
+    def _unused_packages(self, l: PackageLoad, all_masked: str) -> set[str]:
+        """Report (and remove) tagging-incompatible packages the document never uses."""
+        f, c = l.file, l.cmd
+        unused = set()
+        for n in l.names:
+            sign = PACKAGE_USE_SIGNS.get(n)
+            if not sign:
+                continue
+            body = "\n".join(sp.file.masked[sp.start:sp.end] for sp in self.spans)
+            companions = PACKAGE_COMPANION_CMDS.get(n, ())
+            use_text = body
+            for cmd in companions:  # \xyoption{all} alone is not a use of xy
+                use_text = re.sub(r"\\" + cmd + r"(?![A-Za-z])", " ", use_text)
+            if re.search(sign, use_text):
+                continue
+            unused.add(n)
+            edits = []
+            if len(l.names) == 1:
+                edits.append(_comment_out(f, c.start, c.end, "unused; incompatible with tagging"))
+            else:
+                keep = [x for x in l.names if x not in unused]
+                if keep:
+                    a, b = c.args[1].inner
+                    edits.append(Edit(f.path, a, b, ",".join(keep)))
+            used_companions = []
+            for cmd in companions:
+                for cf, cc, _ in _cmds_in_spans(self.pre, cmd, "m"):
+                    edits.append(_comment_out(cf, cc.start, cc.end, f"only needed with {n}"))
+                    if cmd not in used_companions:
+                        used_companions.append(cmd)
+            also = ", ".join("\\" + x for x in used_companions)
+            self.add("PACKAGE_UNUSED", "warning", "auto", RANK_TAGGING,
+                     f"Package '{n}' is incompatible with tagging and the document does not seem to use it. Removed it"
+                     + (f" and its {also} lines." if used_companions else "."),
+                     f, c.start, hint="If a compile error shows it was needed after all, restore it and check the PDF's tags.",
+                     edits=edits)
+        if len(unused) > 1 and len(l.names) > len(unused):
+            # Several removals from one \usepackage list: keep one edit with the final list.
+            keep = [x for x in l.names if x not in unused]
+            a, b = c.args[1].inner
+            for fd in self.a.findings:
+                if fd.code == "PACKAGE_UNUSED":
+                    fd.edits = [e for e in fd.edits if not (e.path == f.path and e.start == a and e.end == b)]
+            self.a.findings[-1].edits.append(Edit(f.path, a, b, ",".join(keep)))
+        return unused
 
     def _short_label_edits(self) -> tuple[list[Edit], int, bool]:
         """Rewrite short list labels such as [(a)] (enumerate package, enumitem's shortlabels) as label=(\\alph*)."""
@@ -836,6 +898,45 @@ class Checker:
                      f"{what} has alt text '{alt}', which Ally accepts but which doesn't describe the figure.",
                      f, pos, data=data)
 
+    def _graphics_dirs(self) -> list[Path]:
+        dirs = [self.p.root]
+        for f, c, _ in _cmds_in_spans(self.pre + self.body, "graphicspath", "m"):
+            raw = c.arg_text(f.masked, 0) or ""
+            for m in re.finditer(r"\{([^{}]*)\}", raw):
+                d = m.group(1).strip()
+                if d:
+                    dirs.append((self.p.root / d).resolve() if not Path(d).is_absolute() else Path(d))
+        return dirs
+
+    def check_graphics_files(self) -> None:
+        """Images that are not next to the source: alt text then has to be written blind, and compiling fails."""
+        dirs = self._graphics_dirs()
+        missing, first = [], None
+        for f, c, _ in _cmds_in_spans(self.body + self.pre, "includegraphics", "oom"):
+            name = (c.arg_text(f.masked, 2) or "").strip()
+            if not name or "#" in name or "\\" in name:
+                continue
+            found = False
+            for d in dirs:
+                base = d / name
+                if base.is_file() or any(Path(str(base) + ext).is_file() for ext in GRAPHIC_EXTS):
+                    found = True
+                    break
+            if not found and name not in missing:
+                missing.append(name)
+                if first is None:
+                    first = (f, c.start)
+        if missing:
+            shown = ", ".join(missing[:12]) + (f", and {len(missing) - 12} more" if len(missing) > 12 else "")
+            self.add("GRAPHICS_MISSING", "warning", "manual", RANK_FIGURES,
+                     f"{len(missing)} image file(s) are not in the project folder: {shown}. Without them the alt text "
+                     "has to be written from the surrounding text alone, and the document will not compile.",
+                     first[0], first[1],
+                     hint="Ask for the image files. To test tagging meanwhile, compile in a scratch folder with blank "
+                          "stand-in images of the same names; mark any alt text written without seeing the image for "
+                          "the author to check.",
+                     data={"missing": missing})
+
     # ---------- tables ----------
     def check_tables(self) -> None:
         event_re = re.compile(r"\\(begin|end)\s*\{([^}]+)\}|\\tagpdfsetup\s*(?=\{)")
@@ -918,11 +1019,39 @@ class Checker:
         return None
 
     # ---------- headings ----------
-    def check_headings(self) -> None:
+    def _heading_macros(self) -> dict[str, tuple[int, str]]:
+        """User macros whose definition is a single heading, e.g. \\newcommand{\\lecture}[1]{\\newpage\\section{#1}}."""
+        out = {}
+        head_re = re.compile(r"\\(" + "|".join(HEADING_LEVELS) + r")(?![A-Za-z])")
+        for cmd in ("newcommand", "renewcommand", "providecommand"):
+            for f, c, _ in _cmds_in_spans(self.pre, cmd, "m"):
+                m = re.match(r"\s*\\([A-Za-z@]+)\s*$", c.arg_text(f.masked, 0) or "")
+                if not m:
+                    continue
+                parsed = parse_args(f.masked, c.end, "oom")
+                if not parsed:
+                    continue
+                body = f.masked[parsed[0][2].inner[0]:parsed[0][2].inner[1]]
+                hs = head_re.findall(body)
+                if len(hs) == 1 and m.group(1) not in HEADING_LEVELS:
+                    out[m.group(1)] = (HEADING_LEVELS[hs[0]], hs[0])
+        return out
+
+    def _heading_uses(self) -> list[tuple[int, int, str, SourceFile, Command, str]]:
+        """Every heading in the body, in document order: (order, level, command, file, cmd, label)."""
         heads = []
         for name, lvl in HEADING_LEVELS.items():
             for f, c, _ in _cmds_in_spans(self.body, name, "om"):
-                heads.append((self._order(f, c.start), lvl, name, f, c))
+                heads.append((self._order(f, c.start), lvl, name, f, c, plain_text(c.arg_text(f.masked, 1) or "")))
+        for name, (lvl, real) in self._heading_macros().items():
+            for f, c, _ in _cmds_in_spans(self.body, name, ""):
+                label = plain_text(f.masked[c.end:c.end + 80].split("\n")[0]).strip()
+                heads.append((self._order(f, c.start), lvl, f"{name} (a \\{real})", f, c, "\\" + name + " " + label))
+        heads.sort(key=lambda h: h[0])
+        return heads
+
+    def check_headings(self) -> None:
+        heads = self._heading_uses()
         heads.sort(key=lambda h: h[0])
         booklike = (self.doc_class in BOOKLIKE_CLASSES) and any(h[1] == 0 for h in heads)
         top = 0 if booklike else 1
@@ -963,8 +1092,85 @@ class Checker:
                                   "if it is a run-in label (e.g. 'Problem 3.'), leave it.",
                      data={"question": "fake-heading", "text": label})
 
+    def _theorem_envs(self) -> set[str]:
+        names = {"proof"}
+        for f, c, _ in _cmds_in_spans(self.pre, "newtheorem", "m"):
+            n = (c.arg_text(f.masked, 0) or "").strip()
+            if n:
+                names.add(n)
+                if not c.star:
+                    names.add(n + "*")  # tagging defines the starred variant too
+        return names
+
+    def check_headings_in_theorems(self) -> None:
+        """A heading inside a theorem-like environment breaks the tag tree for the rest of the document."""
+        envs = self._theorem_envs()
+        heads = {(id(h[3]), h[4].start): h for h in self._heading_uses()}
+        tok = re.compile(r"\\(begin|end)\s*\{([^}]*)\}")
+        events = []
+        for sp in self.body:
+            for m in tok.finditer(sp.file.masked, sp.start, sp.end):
+                events.append((self._order(sp.file, m.start()), m.group(1), m.group(2).strip(), sp.file, m.start()))
+        for h in heads.values():
+            events.append((h[0], "head", h, h[3], h[4].start))
+        events.sort(key=lambda e: e[0])
+        stack = []
+        for _, kind, val, f, pos in events:
+            if kind == "begin":
+                stack.append((val, f, pos))
+            elif kind == "end":
+                for i in range(len(stack) - 1, -1, -1):
+                    if stack[i][0] == val:
+                        del stack[i:]
+                        break
+            else:
+                inside = [e for e in stack if e[0] in envs]
+                if inside:
+                    env = inside[-1][0]
+                    self.add("HEADING_IN_THEOREM", "error", "manual", RANK_TAGGING,
+                             f"\\{val[2].split()[0]} '{val[5]}' is inside the {env} environment. A heading inside a "
+                             "theorem-like environment leaves the tag structure open, so every later section gets "
+                             "'The structure Sect can not be closed' and the PDF's heading tree is wrong.",
+                             f, pos, hint=f"Move the heading above \\begin{{{env}}}, or make it a run-in label: "
+                                          "\\par\\medskip\\noindent\\textbf{...}.")
+
+    def check_theorem_stars(self) -> None:
+        """With tagging on, \\newtheorem{X} also defines X*, so a separate \\newtheorem*{X*} is an error."""
+        styles = [(self._order(f, c.start), (c.arg_text(f.masked, 0) or "").strip())
+                  for f, c, _ in _cmds_in_spans(self.pre, "theoremstyle", "m")]
+
+        def style_at(order):
+            cur = "plain"
+            for o, st in styles:
+                if o < order:
+                    cur = st
+            return cur
+        plain = {}
+        for f, c, _ in _cmds_in_spans(self.pre, "newtheorem", "mom"):
+            if not c.star:
+                n = (c.arg_text(f.masked, 0) or "").strip()
+                plain[n] = ((c.arg_text(f.masked, 2) or "").strip(), style_at(self._order(f, c.start)))
+        for f, c, _ in _cmds_in_spans(self.pre, "newtheorem", "mm"):
+            if not c.star:
+                continue
+            n = (c.arg_text(f.masked, 0) or "").strip()
+            if not n.endswith("*") or n[:-1] not in plain:
+                continue
+            title = (c.arg_text(f.masked, 1) or "").strip()
+            same = plain[n[:-1]] == (title, style_at(self._order(f, c.start)))
+            msg = (f"\\newtheorem*{{{n}}} clashes with tagging: \\newtheorem{{{n[:-1]}}} already defines an unnumbered "
+                   f"{n} environment ('Command \\{n} already defined').")
+            if same:
+                self.add("THEOREM_STAR_DUP", "error", "auto", RANK_TAGGING,
+                         msg + " Removed the duplicate; the automatic one looks the same.", f, c.start,
+                         edits=[_comment_out(f, c.start, c.end, "tagging defines it from the numbered version")])
+            else:
+                self.add("THEOREM_STAR_DUP", "error", "manual", RANK_TAGGING,
+                         msg + " Its title or theorem style differs, so it needs a new name.", f, c.start,
+                         hint=f"Rename it (e.g. {n[:-1]}u) here and at each use, or remove it if the automatic {n} will do.")
+
     def _outline(self, heads) -> list[str]:
-        return [f"{'  ' * max(0, h[1])}\\{h[2]}{{{plain_text(h[4].arg_text(h[3].masked, 1) or '')}}}" for h in heads][:60]
+        return [f"{'  ' * max(0, h[1])}\\{h[2]}{{{h[5]}}}" for h in heads][:60]
 
     def _fake_headings(self) -> list[tuple[SourceFile, int, str]]:
         """Lines that consist only of bold/large text, after a paragraph break."""

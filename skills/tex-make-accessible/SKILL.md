@@ -46,13 +46,15 @@ The department guidance this skill follows is at https://zachnorwood.github.io/m
 - **`lang`:** set it to the document's language. The script reads it from babel/polyglossia; ask if unsure.
 - **`math/alt/use`:** a compromise for Ally, which doesn't yet recognize embedded MathML. If a student who uses a screen reader will read the document, leave it out (`--no-math-alt`) and keep `math/setup=mathml-SE`. See the resource page's "MathML and math/alt/use" section.
 - **The PDF title must be set.** Ally reads the Info dictionary title, so use `\hypersetup{pdftitle={...}}` with a human-readable title.
-- **Compile with LuaLaTeX,** twice, or three times if there's a table of contents.
+- **Compile with LuaLaTeX,** twice, or three times if there's a table of contents. With `\printindex`, run `makeindex` before the last pass.
 
 ## Workflow
 
 ### 1. Intake
 
 Get every file the document needs: the main `.tex`, every `\input`/`\include` file, images, custom `.sty`/`.cls`/macro files, and `.bib`.
+
+If `check` reports `GRAPHICS_MISSING`, ask for the images before writing alt text. If they can't be had now, test the tagging in a scratch folder with blank stand-in images of the same names (never in the user's folder). Draft alt text from the math and context, and list those figures as unverified.
 
 Ask only what you need:
 - Where do they compile (local TeX Live 2026 or Overleaf with TeX Live 2026 and LuaLaTeX)?
@@ -108,7 +110,9 @@ python3 scripts/tex-a11y fix main.tex      # writes main-accessible.tex and main
 - equation shortcuts such as `\beq` written out;
 - `center` removed around display math;
 - missing proof levels declared;
-- `\ref` in headings changed to `\ref*`.
+- `\ref` in headings changed to `\ref*`;
+- unused tagging-incompatible packages (`xy`, `amscd`, `framed`, `mdframed`) removed;
+- `\newtheorem*{X*}` removed where `\newtheorem{X}` already gives the same unnumbered `X*` under tagging.
 
 It keeps line endings and converts Latin-1 files to UTF-8. Show the user the summary, not the whole diff.
 
@@ -136,7 +140,8 @@ Work in the `-accessible` copy. Show proposed alt text and heading names to the 
   - Replace them with `\usepackage{unicode-math}` and OpenType fonts loaded after `amsmath`, using the suggestion in the finding.
   - Remove `amssymb` too.
   - This changes the look, so ask. It's often necessary: `txfonts` under LuaLaTeX silently loses bold.
-- **`PACKAGE_INCOMPATIBLE`:** a warning, not a verdict. Check whether the document uses the package. Remove unused ones; otherwise compile and inspect.
+- **`PACKAGE_INCOMPATIBLE`:** a warning, not a verdict. `fix` already removes some unused ones (`PACKAGE_UNUSED`: `xy`, `amscd`, `framed`, `mdframed`); for others, check whether the document uses the package and remove it if not. Otherwise compile and inspect. Read the status note: some problems only affect one engine. For example, `framed` loses content after a page break under pdfLaTeX and XeLaTeX, and in testing (25 boxes in 117 pages of notes) it compiled and tagged cleanly under LuaLaTeX, so keep it if the boxes have no titles.
+- **`HEADING_IN_THEOREM`:** a heading inside an example, theorem or proof breaks the heading tree for the rest of the document. Move it above the environment, or turn it into a run-in label (`\par\medskip\noindent\textbf{Discussion Question.}`).
 - **`CLASS_PARTIAL` (amsart):** usually compiles; confirm the PDF title appears. Offer `article` only if there's a problem.
 - **`CONTRAST_NEAR_WHITE`:** white or hidden text. Remove hidden text; for text on dark boxes, prefer dark text on a light box.
 
@@ -144,7 +149,7 @@ Work in the `-accessible` copy. Show proposed alt text and heading names to the 
 
 If you have LuaLaTeX, compile yourself; otherwise ask the user to, and to paste errors back. Read the log, not just the exit code: tagging problems often appear only as `tagpdf` warnings.
 
-- **Errors** (`!` lines, "para hooks differ", "can not be closed", "instance ... unknown"): look them up in `reference/compile-errors.md`.
+- **Errors** (`!` lines, "para hooks differ", "can not be closed", "instance ... unknown"): look them up in `reference/compile-errors.md`. Some errors were already in the original (a stray `\item`, say); compile it without `\DocumentMetadata` to tell them apart.
 - **Warnings** such as `Parent-Child ... Relation is not allowed` for MathML are minor; mention them, but they don't block.
 - **Check the page count:** a document that grows past 3 pages under LuaLaTeX now needs headings.
 
@@ -181,10 +186,10 @@ Remind them that Ally scans every file in Canvas Files, including unpublished on
 
 **`amsart` to `article`:**
 - Change the class (drop options article doesn't know).
+- Load what amsart loaded itself: `\usepackage{amsmath,amsthm}`, and `\usepackage{makeidx}` if the document uses `\printindex`.
 - Remove `\title`'s optional short-title argument.
 - Add stand-ins for amsart-only commands, e.g. `\newcommand{\address}[1]{...}` and `\newcommand{\email}[1]{...}` printing at the end as amsart does.
-- Keep `amsthm`.
-- The layout changes; say so.
+- The layout changes (page size, margins, heading styles); say so. amsart's run-in `\subsection` becomes a display heading.
 
 **`mdframed` to `tcolorbox`** (mdframed is not supported):
 
